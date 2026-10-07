@@ -1,7 +1,7 @@
 {
   "name": "Roteirizador & Entregas",
   "short_name": "Entregas",
-  "start_url": "/nome-do-seu-repositorio/index.html",
+  "start_url": "https://rafaelsantoro.github.io/roteador_de_entregas/index.html",
   "display": "standalone",
   "background_color": "#0f172a",
   "theme_color": "#0f172a",
