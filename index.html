@@ -1,0 +1,1202 @@
+<!DOCTYPE html>
+<html lang="pt-BR">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+    <title>Roteirizador & Controle de Entregas</title>
+    <!-- Tailwind CSS -->
+    <script src="https://cdn.tailwindcss.com"></script>
+    <!-- MapLibre GL CSS & JS -->
+    <link href="https://unpkg.com/maplibre-gl@3.6.2/dist/maplibre-gl.css" rel="stylesheet" />
+    <script src="https://unpkg.com/maplibre-gl@3.6.2/dist/maplibre-gl.js"></script>
+    <!-- SheetJS (XLSX Parser) -->
+    <script src="https://cdn.jsdelivr.net/npm/xlsx@0.18.5/dist/xlsx.full.min.js"></script>
+    <!-- FontAwesome -->
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css">
+    
+    <style>
+        .custom-scroll::-webkit-scrollbar { width: 5px; }
+        .custom-scroll::-webkit-scrollbar-thumb { background: #cbd5e1; border-radius: 4px; }
+        button, select, input { touch-action: manipulation; }
+        .maplibregl-popup-content { padding: 14px; border-radius: 12px; box-shadow: 0 10px 20px -3px rgba(0,0,0,0.2); }
+        .custom-marker-wrapper { cursor: pointer; }
+        
+        #map-panel { min-height: 0; position: relative; }
+        #map { position: absolute; top: 0; bottom: 0; width: 100%; height: 100%; }
+
+        /* Animação do pulso do ícone do entregador */
+        .driver-pulse {
+            box-shadow: 0 0 0 0 rgba(239, 68, 68, 0.7);
+            animation: pulse-ring 1.8s infinite cubic-bezier(0.66, 0, 0, 1);
+        }
+        @keyframes pulse-ring {
+            to { box-shadow: 0 0 0 16px rgba(239, 68, 68, 0); }
+        }
+    </style>
+</head>
+<body class="bg-slate-900 font-sans text-slate-800 flex flex-col h-screen overflow-hidden">
+
+    <!-- Top Header -->
+    <header class="bg-slate-900 text-white px-4 py-2.5 shadow-md flex flex-wrap justify-between items-center border-b border-slate-800 shrink-0 z-20">
+        <div class="flex items-center space-x-2">
+            <i class="fa-solid fa-truck-ramp-box text-xl text-indigo-400"></i>
+            <div>
+                <h1 class="text-base font-bold leading-none">Roteirizador & Entregas</h1>
+                <p class="text-[10px] text-slate-400">Cômputo Total: Casa ➔ PK2U ➔ Entregas ➔ Casa</p>
+            </div>
+        </div>
+
+        <!-- Dynamic Counters -->
+        <div id="status-counters" class="flex items-center space-x-1.5 text-xs mt-1 sm:mt-0">
+            <span class="bg-slate-800 text-slate-300 px-2.5 py-1 rounded-md border border-slate-700 font-semibold text-xs" title="Total">
+                <i class="fa-solid fa-boxes-packing text-indigo-400 mr-1"></i><span id="cnt-total">0</span>
+            </span>
+            <span class="bg-emerald-950 text-emerald-300 px-2.5 py-1 rounded-md border border-emerald-800 font-semibold text-xs" title="Sucesso">
+                <i class="fa-solid fa-circle-check text-emerald-400 mr-1"></i><span id="cnt-success">0</span>
+            </span>
+            <span class="bg-rose-950 text-rose-300 px-2.5 py-1 rounded-md border border-rose-800 font-semibold text-xs" title="Ocorrência">
+                <i class="fa-solid fa-circle-xmark text-rose-400 mr-1"></i><span id="cnt-occurrence">0</span>
+            </span>
+        </div>
+    </header>
+
+    <!-- Banner de Alerta para ficheiros locais file:// -->
+    <div id="file-protocol-warning" class="hidden bg-amber-500 text-slate-950 text-xs font-bold px-3 py-2 flex items-center justify-between shrink-0 z-30">
+        <div class="flex items-center space-x-2">
+            <i class="fa-solid fa-triangle-exclamation text-base"></i>
+            <span>Atenção: Abrir o HTML direto da memória do telemóvel (file://) impede o GPS no Edge. Use um servidor local para GPS em tempo real.</span>
+        </div>
+        <button onclick="document.getElementById('file-protocol-warning').remove()" class="text-slate-900 font-bold px-2">✕</button>
+    </div>
+
+    <!-- Main Workspace -->
+    <div class="flex-1 flex flex-col md:flex-row relative overflow-hidden bg-slate-100">
+        
+        <!-- Sidebar / Delivery List -->
+        <aside id="sidebar-panel" class="w-full md:w-96 bg-white flex flex-col h-full z-10 border-r border-slate-200 transition-all duration-300">
+            
+            <!-- Controls Box -->
+            <div class="p-3 border-b border-slate-200 bg-slate-50 space-y-2 shrink-0">
+                
+                <!-- Mobile Map Toggle Quick Button -->
+                <button onclick="switchMobileTab('map')" class="md:hidden w-full bg-indigo-50 hover:bg-indigo-100 text-indigo-700 border border-indigo-200 text-xs font-bold py-2 px-3 rounded-lg flex items-center justify-center space-x-2 transition">
+                    <i class="fa-solid fa-map-location-dot text-indigo-600"></i>
+                    <span>Ver Mapa em Tela Cheia</span>
+                </button>
+
+                <!-- Upload Box -->
+                <div id="drop-zone" class="border-2 border-dashed border-indigo-200 rounded-lg p-2.5 text-center hover:border-indigo-500 transition cursor-pointer bg-white shadow-sm">
+                    <input type="file" id="file-input" accept=".xlsx, .xls" class="hidden">
+                    <div class="flex items-center justify-center space-x-2">
+                        <i class="fa-solid fa-file-excel text-emerald-600 text-base"></i>
+                        <span class="text-xs font-bold text-slate-700">Carregar Planilha XLSX</span>
+                    </div>
+                </div>
+
+                <!-- Configs: 1st Delivery Select -->
+                <div>
+                    <label class="block text-[11px] font-bold text-slate-600 mb-1">Escolha a 1ª Entrega:</label>
+                    <select id="start-point-select" class="w-full border border-slate-300 rounded-lg p-2 text-xs bg-white focus:ring-2 focus:ring-indigo-500 outline-none truncate" disabled>
+                        <option value="-1">Automática (Melhor Rota a partir da PK2U)</option>
+                    </select>
+                </div>
+
+                <!-- Rule Toggle: Prioritize Same Street -->
+                <div class="flex items-center space-x-2 px-1 py-1 bg-indigo-50/60 rounded-md border border-indigo-100">
+                    <input type="checkbox" id="prioritize-same-street" class="rounded text-indigo-600 focus:ring-indigo-500 h-4 w-4 cursor-pointer" checked>
+                    <label for="prioritize-same-street" class="text-[11px] font-bold text-indigo-900 cursor-pointer">
+                        Priorizar concluir entregas na mesma rua
+                    </label>
+                </div>
+
+                <!-- Action Buttons -->
+                <div class="space-y-2 pt-1">
+                    <button id="btn-optimize" disabled class="w-full bg-indigo-600 hover:bg-indigo-700 disabled:bg-slate-300 text-white text-xs font-bold py-2 px-3 rounded-lg shadow transition flex items-center justify-center space-x-1.5">
+                        <i class="fa-solid fa-route"></i>
+                        <span>Otimizar Rota</span>
+                    </button>
+
+                    <!-- Novo Botão de Exportação para OsmAnd (GPX) -->
+                    <button id="btn-export-gpx" disabled class="w-full bg-amber-600 hover:bg-amber-700 disabled:bg-slate-300 text-white text-xs font-bold py-2 px-3 rounded-lg shadow transition flex items-center justify-center space-x-1.5">
+                        <i class="fa-solid fa-map-location-dot"></i>
+                        <span>Exportar GPX (OsmAnd)</span>
+                    </button>
+
+                    <button id="btn-export" disabled class="w-full bg-emerald-600 hover:bg-emerald-700 disabled:bg-slate-300 text-white text-xs font-bold py-2 px-3 rounded-lg shadow transition flex items-center justify-center space-x-1.5">
+                        <i class="fa-solid fa-download"></i>
+                        <span>Exportar Relatório Excel</span>
+                    </button>
+                </div>
+            </div>
+
+            <!-- List Container -->
+            <div class="flex-1 overflow-y-auto custom-scroll p-3 space-y-2.5" id="stops-list-container">
+                <div class="text-center py-12 text-slate-400">
+                    <i class="fa-solid fa-map-location-dot text-4xl mb-2 text-slate-300"></i>
+                    <p class="text-xs">Importe a planilha para listar as entregas.</p>
+                </div>
+            </div>
+        </aside>
+
+        <!-- Map Panel -->
+        <main id="map-panel" class="flex-1 w-full h-full relative hidden md:block">
+            <div id="map"></div>
+
+            <!-- Floating GPS Real-time Toggle Button -->
+            <button id="btn-gps-toggle" onclick="toggleGPS()" title="Ativar GPS em Tempo Real" class="absolute bottom-36 right-3 z-20 w-11 h-11 bg-slate-900/90 hover:bg-slate-800 text-slate-300 backdrop-blur-md rounded-full shadow-2xl border border-slate-700 flex items-center justify-center text-lg active:scale-95 transition">
+                <i class="fa-solid fa-location-crosshairs" id="gps-icon"></i>
+            </button>
+
+            <!-- Mobile Quick Toggle Back to List -->
+            <button onclick="switchMobileTab('list')" class="md:hidden absolute bottom-5 left-1/2 -translate-x-1/2 z-20 bg-slate-900/95 text-white px-4 py-2.5 rounded-full shadow-2xl border border-slate-700 text-xs font-bold flex items-center space-x-2 active:scale-95 transition">
+                <i class="fa-solid fa-list-check text-indigo-400"></i>
+                <span>Ver Lista de Entregas</span>
+            </button>
+
+            <!-- Distance Floating Badge -->
+            <div id="dist-badge" class="hidden absolute top-3 left-3 z-10 bg-slate-900/90 backdrop-blur-md text-white px-3 py-1.5 rounded-full shadow-lg border border-slate-700 text-xs font-bold flex items-center space-x-2">
+                <i class="fa-solid fa-road text-amber-400"></i>
+                <div>
+                    <span id="dist-text" class="text-sm text-amber-300">0 km</span>
+                </div>
+            </div>
+
+            <!-- Loading Overlay -->
+            <div id="loading-overlay" class="hidden absolute inset-0 bg-slate-900/60 backdrop-blur-sm z-[1000] flex items-center justify-center">
+                <div class="bg-white p-5 rounded-2xl shadow-2xl flex flex-col items-center space-y-3">
+                    <div class="w-8 h-8 border-4 border-indigo-600 border-t-transparent rounded-full animate-spin"></div>
+                    <p id="loading-text" class="text-xs font-bold text-slate-700">Calculando traçado de ruas...</p>
+                </div>
+            </div>
+        </main>
+    </div>
+
+    <!-- Mobile Navigation Bar (Bottom) -->
+    <nav class="md:hidden bg-slate-900 border-t border-slate-800 flex justify-around p-1.5 shrink-0 z-30">
+        <button id="nav-btn-list" onclick="switchMobileTab('list')" class="flex-1 py-1.5 px-3 text-center text-indigo-400 font-bold text-xs flex flex-col items-center space-y-1 bg-slate-800/80 rounded-lg">
+            <i class="fa-solid fa-list-check text-base"></i>
+            <span>Lista</span>
+        </button>
+        <button id="nav-btn-map" onclick="switchMobileTab('map')" class="flex-1 py-1.5 px-3 text-center text-slate-400 font-bold text-xs flex flex-col items-center space-y-1">
+            <i class="fa-solid fa-map-marked-alt text-base"></i>
+            <span>Mapa</span>
+        </button>
+    </nav>
+
+    <script>
+        const ORS_API_KEY = 'eyJvcmciOiI1YjNjZTM1OTc4NTExMTAwMDFjZjYyNDgiLCJpZCI6ImIwNzE4MDA5ZDMzMTRhM2RiZjNjY2EyYTQ2ZDFhZWM2IiwiaCI6Im11cm11cjY0In0=';
+        const STORAGE_KEY = 'delivery_router_saved_state';
+        const LIGHT_THEME_URL = 'https://basemaps.cartocdn.com/gl/voyager-gl-style/style.json';
+
+        // PONTOS FIXOS (Para cômputo da quilometragem total)
+        const FIXED_HOME = { lat: -23.086416, lng: -48.918759 };
+        const FIXED_PK2U = { lat: -23.166412, lng: -48.952036 };
+
+        let rawData = [];
+        let activePoints = [];
+        let map;
+        let markersMap = new Map();
+        let currentRouteGeometry = null;
+        let currentRouteDistanceKm = '0';
+
+        // GPS Entregador
+        let gpsWatchId = null;
+        let driverMarker = null;
+
+        document.addEventListener('DOMContentLoaded', () => {
+            if (window.location.protocol === 'file:') {
+                const warnBox = document.getElementById('file-protocol-warning');
+                if (warnBox) warnBox.classList.remove('hidden');
+            }
+
+            map = new maplibregl.Map({
+                container: 'map',
+                style: LIGHT_THEME_URL,
+                center: [-48.945, -23.107],
+                zoom: 13,
+                pixelRatio: window.devicePixelRatio || 2
+            });
+
+            map.addControl(new maplibregl.NavigationControl({ showCompass: false }), 'bottom-right');
+
+            map.on('style.load', () => {
+                try {
+                    boostMapTextLabels();
+                } catch(e) {}
+                updateRouteOnMap();
+            });
+
+            map.on('load', () => {
+                loadStateFromLocalStorage();
+            });
+
+            setupEvents();
+        });
+
+        function boostMapTextLabels() {
+            if (!map) return;
+            const style = map.getStyle();
+            if (!style || !style.layers) return;
+
+            const scaleFactor = 1.65;
+
+            style.layers.forEach(layer => {
+                if (layer.type === 'symbol' && layer.layout && layer.layout['text-field']) {
+                    try {
+                        const currentSize = map.getLayoutProperty(layer.id, 'text-size');
+                        if (currentSize !== undefined && currentSize !== null) {
+                            if (Array.isArray(currentSize) && currentSize[0] === '*' && currentSize[1] === scaleFactor) {
+                                return;
+                            }
+                            map.setLayoutProperty(layer.id, 'text-size', ['*', scaleFactor, currentSize]);
+                        } else {
+                            map.setLayoutProperty(layer.id, 'text-size', 16);
+                        }
+                    } catch (e) {}
+                }
+            });
+        }
+
+        function toggleGPS() {
+            const btn = document.getElementById('btn-gps-toggle');
+            const icon = document.getElementById('gps-icon');
+
+            if (gpsWatchId !== null) {
+                navigator.geolocation.clearWatch(gpsWatchId);
+                gpsWatchId = null;
+
+                if (driverMarker) {
+                    driverMarker.remove();
+                    driverMarker = null;
+                }
+
+                btn.className = "absolute bottom-36 right-3 z-20 w-11 h-11 bg-slate-900/90 hover:bg-slate-800 text-slate-300 backdrop-blur-md rounded-full shadow-2xl border border-slate-700 flex items-center justify-center text-lg active:scale-95 transition";
+                icon.className = "fa-solid fa-location-crosshairs";
+            } else {
+                if (!navigator.geolocation) {
+                    alert("A geolocalização não é suportada por este navegador/dispositivo.");
+                    return;
+                }
+
+                showLoading("Conectando ao GPS...");
+
+                gpsWatchId = navigator.geolocation.watchPosition(
+                    onGpsSuccess,
+                    onGpsError,
+                    { enableHighAccuracy: true, maximumAge: 1000, timeout: 12000 }
+                );
+
+                btn.className = "absolute bottom-36 right-3 z-20 w-11 h-11 bg-indigo-600 text-white backdrop-blur-md rounded-full shadow-2xl border-2 border-white flex items-center justify-center text-lg active:scale-95 transition";
+                icon.className = "fa-solid fa-location-arrow animate-pulse";
+            }
+        }
+
+        function onGpsSuccess(position) {
+            hideLoading();
+            const lng = position.coords.longitude;
+            const lat = position.coords.latitude;
+            const heading = position.coords.heading;
+
+            if (!driverMarker) {
+                const el = document.createElement('div');
+                el.className = 'custom-marker-wrapper';
+                el.innerHTML = `
+                    <div class="driver-pulse w-10 h-10 rounded-full bg-indigo-600 border-2 border-white text-white shadow-2xl flex items-center justify-center text-sm transition-transform duration-300">
+                        <i class="fa-solid fa-car-side" id="driver-car-icon"></i>
+                    </div>
+                `;
+
+                driverMarker = new maplibregl.Marker({ element: el })
+                    .setLngLat([lng, lat])
+                    .addTo(map);
+
+                map.flyTo({ center: [lng, lat], zoom: 16 });
+            } else {
+                driverMarker.setLngLat([lng, lat]);
+            }
+
+            if (heading !== null && heading !== undefined && !isNaN(heading)) {
+                const carIcon = document.getElementById('driver-car-icon');
+                if (carIcon) {
+                    carIcon.style.transform = `rotate(${heading}deg)`;
+                }
+            }
+        }
+
+        function onGpsError(err) {
+            hideLoading();
+            let msg = "Erro ao obter localização.";
+            switch(err.code) {
+                case err.PERMISSION_DENIED:
+                    msg = "A permissão de localização foi negada no navegador.\n\nAtive a permissão de GPS para utilizar a navegação em tempo real.";
+                    break;
+                case err.POSITION_UNAVAILABLE:
+                    msg = "Sinal de GPS indisponível no momento.";
+                    break;
+                case err.TIMEOUT:
+                    msg = "Tempo esgotado ao buscar o sinal GPS.";
+                    break;
+            }
+            alert(msg);
+            toggleGPS();
+        }
+
+        function normalizeStreetName(address) {
+            if (!address || typeof address !== 'string') return '';
+            let part = address.split(',')[0];
+            part = part.replace(/\d.*/, '');
+            part = part.normalize('NFD').replace(/[\u0300-\u036f]/g, '');
+            part = part.toLowerCase().trim();
+            part = part.replace(/^(rua|r\.|r|avenida|av\.|av|alameda|al\.|al|praca|prc\.|prc)\s+/, '');
+            return part.trim();
+        }
+
+        function ensureArrowIcon() {
+            if (!map) return;
+            try {
+                if (!map.hasImage('route-arrow-icon')) {
+                    const canvas = document.createElement('canvas');
+                    canvas.width = 24;
+                    canvas.height = 24;
+                    const ctx = canvas.getContext('2d');
+
+                    ctx.fillStyle = '#ffffff';
+                    ctx.strokeStyle = '#0f172a';
+                    ctx.lineWidth = 2.0;
+
+                    ctx.beginPath();
+                    ctx.moveTo(22, 12);
+                    ctx.lineTo(4, 3);
+                    ctx.lineTo(9, 12);
+                    ctx.lineTo(4, 21);
+                    ctx.closePath();
+
+                    ctx.fill();
+                    ctx.stroke();
+
+                    const imageData = ctx.getImageData(0, 0, 24, 24);
+                    map.addImage('route-arrow-icon', imageData);
+                }
+            } catch(e) {}
+        }
+
+        function updateRouteOnMap() {
+            if (!map) return;
+
+            let routeGeometry = currentRouteGeometry;
+
+            if (!routeGeometry || !routeGeometry.coordinates || routeGeometry.coordinates.length === 0) {
+                if (activePoints && activePoints.length > 0) {
+                    routeGeometry = {
+                        'type': 'LineString',
+                        'coordinates': activePoints.map(p => [p.lng, p.lat])
+                    };
+                } else {
+                    routeGeometry = { 'type': 'LineString', 'coordinates': [] };
+                }
+            }
+
+            const geojsonData = {
+                'type': 'Feature',
+                'properties': {},
+                'geometry': routeGeometry
+            };
+
+            const lineColor = '#ef4444';
+
+            try {
+                if (!map.getSource('route-source')) {
+                    map.addSource('route-source', {
+                        'type': 'geojson',
+                        'data': geojsonData
+                    });
+                } else {
+                    map.getSource('route-source').setData(geojsonData);
+                }
+            } catch (e) {}
+
+            try {
+                if (!map.getLayer('route-layer')) {
+                    map.addLayer({
+                        'id': 'route-layer',
+                        'type': 'line',
+                        'source': 'route-source',
+                        'layout': {
+                            'line-join': 'round',
+                            'line-cap': 'round'
+                        },
+                        'paint': {
+                            'line-color': lineColor,
+                            'line-width': 5,
+                            'line-opacity': 0.95
+                        }
+                    });
+                } else {
+                    map.setPaintProperty('route-layer', 'line-color', lineColor);
+                }
+            } catch (e) {}
+
+            try {
+                ensureArrowIcon();
+                if (!map.getLayer('route-arrows-layer')) {
+                    map.addLayer({
+                        'id': 'route-arrows-layer',
+                        'type': 'symbol',
+                        'source': 'route-source',
+                        'layout': {
+                            'symbol-placement': 'line',
+                            'symbol-spacing': 60,
+                            'icon-image': 'route-arrow-icon',
+                            'icon-size': 0.5,
+                            'icon-allow-overlap': true,
+                            'icon-ignore-placement': true,
+                            'icon-rotation-alignment': 'map'
+                        }
+                    });
+                }
+            } catch (e) {}
+        }
+
+        function setupEvents() {
+            const dropZone = document.getElementById('drop-zone');
+            const fileInput = document.getElementById('file-input');
+
+            dropZone.addEventListener('click', () => fileInput.click());
+            dropZone.addEventListener('dragover', (e) => { e.preventDefault(); dropZone.classList.add('border-indigo-500'); });
+            dropZone.addEventListener('dragleave', () => dropZone.classList.remove('border-indigo-500'));
+            dropZone.addEventListener('drop', (e) => {
+                e.preventDefault();
+                dropZone.classList.remove('border-indigo-500');
+                if (e.dataTransfer.files.length) handleFile(e.dataTransfer.files[0]);
+            });
+            fileInput.addEventListener('change', (e) => {
+                if (e.target.files.length) handleFile(e.target.files[0]);
+            });
+
+            document.getElementById('start-point-select').addEventListener('change', saveStateToLocalStorage);
+            document.getElementById('prioritize-same-street').addEventListener('change', saveStateToLocalStorage);
+
+            document.getElementById('btn-optimize').addEventListener('click', optimizeAndDrawRoute);
+            document.getElementById('btn-export-gpx').addEventListener('click', exportToGPX);
+            document.getElementById('btn-export').addEventListener('click', exportToXLSX);
+        }
+
+        function saveStateToLocalStorage() {
+            if (!activePoints || activePoints.length === 0) return;
+
+            const state = {
+                rawData: rawData,
+                activePoints: activePoints,
+                startIdx: document.getElementById('start-point-select').value,
+                prioritizeSameStreet: document.getElementById('prioritize-same-street').checked,
+                routeGeometry: currentRouteGeometry,
+                routeDistanceKm: currentRouteDistanceKm
+            };
+
+            localStorage.setItem(STORAGE_KEY, JSON.stringify(state));
+        }
+
+        function loadStateFromLocalStorage() {
+            const saved = localStorage.getItem(STORAGE_KEY);
+            if (!saved) return;
+
+            try {
+                const state = JSON.parse(saved);
+                if (!state.rawData || state.rawData.length === 0) return;
+
+                rawData = state.rawData || [];
+                activePoints = state.activePoints || [];
+                currentRouteGeometry = state.routeGeometry || null;
+                currentRouteDistanceKm = state.routeDistanceKm || '0';
+
+                populateSelect(rawData);
+
+                if (state.startIdx !== undefined) {
+                    document.getElementById('start-point-select').value = state.startIdx;
+                }
+
+                if (state.prioritizeSameStreet !== undefined) {
+                    document.getElementById('prioritize-same-street').checked = !!state.prioritizeSameStreet;
+                }
+
+                document.getElementById('start-point-select').disabled = false;
+                document.getElementById('btn-optimize').disabled = false;
+                document.getElementById('btn-export-gpx').disabled = false;
+                document.getElementById('btn-export').disabled = false;
+
+                renderMapAndUI(activePoints, false);
+
+                if (activePoints.length > 0) {
+                    updateRouteOnMap();
+                    document.getElementById('dist-badge').classList.remove('hidden');
+                    document.getElementById('dist-text').textContent = `${currentRouteDistanceKm} km`;
+                }
+            } catch (e) {
+                console.error("Erro local storage:", e);
+                localStorage.removeItem(STORAGE_KEY);
+            }
+        }
+
+        function switchMobileTab(tab) {
+            const sidebar = document.getElementById('sidebar-panel');
+            const mapPanel = document.getElementById('map-panel');
+            const btnList = document.getElementById('nav-btn-list');
+            const btnMap = document.getElementById('nav-btn-map');
+
+            if (tab === 'list') {
+                sidebar.classList.remove('hidden');
+                mapPanel.classList.add('hidden');
+                mapPanel.classList.remove('block');
+                
+                btnList.className = "flex-1 py-1.5 px-3 text-center text-indigo-400 font-bold text-xs flex flex-col items-center space-y-1 bg-slate-800/80 rounded-lg";
+                btnMap.className = "flex-1 py-1.5 px-3 text-center text-slate-400 font-bold text-xs flex flex-col items-center space-y-1";
+            } else {
+                sidebar.classList.add('hidden');
+                mapPanel.classList.remove('hidden');
+                mapPanel.classList.add('block');
+                
+                btnList.className = "flex-1 py-1.5 px-3 text-center text-slate-400 font-bold text-xs flex flex-col items-center space-y-1";
+                btnMap.className = "flex-1 py-1.5 px-3 text-center text-indigo-400 font-bold text-xs flex flex-col items-center space-y-1 bg-slate-800/80 rounded-lg";
+                
+                setTimeout(() => {
+                    if (map) {
+                        map.resize();
+                        if (activePoints.length > 0) {
+                            const bounds = new maplibregl.LngLatBounds();
+                            activePoints.forEach(p => bounds.extend([p.lng, p.lat]));
+                            map.fitBounds(bounds, { padding: 40 });
+                        }
+                    }
+                }, 100);
+            }
+        }
+
+        function handleFile(file) {
+            localStorage.removeItem(STORAGE_KEY);
+            currentRouteGeometry = null;
+            currentRouteDistanceKm = '0';
+            updateRouteOnMap();
+            document.getElementById('dist-badge').classList.add('hidden');
+
+            showLoading("Lendo nova planilha...");
+            const reader = new FileReader();
+
+            reader.onload = function(e) {
+                try {
+                    const data = new Uint8Array(e.target.result);
+                    const workbook = XLSX.read(data, { type: 'array' });
+                    const sheet = workbook.Sheets[workbook.SheetNames[0]];
+                    const json = XLSX.utils.sheet_to_json(sheet);
+
+                    parseAndValidateData(json);
+                } catch (err) {
+                    alert("Erro ao ler arquivo Excel: " + err.message);
+                } finally {
+                    hideLoading();
+                }
+            };
+            reader.readAsArrayBuffer(file);
+        }
+
+        function populateSelect(deliveries) {
+            const select = document.getElementById('start-point-select');
+            select.innerHTML = '<option value="-1">Automática (Melhor Rota a partir da PK2U)</option>';
+            deliveries.forEach((p, i) => {
+                const opt = document.createElement('option');
+                opt.value = i;
+                opt.textContent = `${i + 1}. ${p.spx} - ${p.address.substring(0, 30)}`;
+                select.appendChild(opt);
+            });
+        }
+
+        function parseAndValidateData(json) {
+            rawData = [];
+            
+            json.forEach((row, idx) => {
+                const getVal = (keys) => {
+                    for (let k of keys) {
+                        const found = Object.keys(row).find(rk => rk.trim().toLowerCase() === k.toLowerCase());
+                        if (found && row[found] !== undefined) return row[found];
+                    }
+                    return '';
+                };
+
+                const spx = getVal(['SPX TN', 'SPX', 'TN', 'Codigo', 'ID']);
+                const address = getVal(['Destination Address', 'Endereço', 'Endereco', 'Address']);
+                const bairro = getVal(['Bairro', 'Neighborhood', 'District']);
+                let lat = parseFloat(String(getVal(['Latitude', 'Lat'])).replace(',', '.'));
+                let lng = parseFloat(String(getVal(['Longitude', 'Lng', 'Long'])).replace(',', '.'));
+
+                if (!isNaN(lat) && !isNaN(lng)) {
+                    const addrStr = String(address || 'Endereço não informado').trim();
+                    rawData.push({
+                        id: idx + 1,
+                        spx: String(spx || 'N/A').trim(),
+                        address: addrStr,
+                        streetKey: normalizeStreetName(addrStr),
+                        bairro: String(bairro || '-').trim(),
+                        lat: lat,
+                        lng: lng,
+                        status: 'pending'
+                    });
+                }
+            });
+
+            if (rawData.length === 0) {
+                alert("Nenhuma coordenada válida encontrada na planilha!");
+                return;
+            }
+
+            populateSelect(rawData);
+
+            document.getElementById('start-point-select').disabled = false;
+            document.getElementById('btn-optimize').disabled = false;
+            document.getElementById('btn-export-gpx').disabled = false;
+            document.getElementById('btn-export').disabled = false;
+
+            activePoints = [...rawData];
+            renderMapAndUI(activePoints, false);
+            saveStateToLocalStorage();
+        }
+
+        function haversine(p1, p2) {
+            const R = 6371;
+            const dLat = (p2.lat - p1.lat) * Math.PI / 180;
+            const dLng = (p2.lng - p1.lng) * Math.PI / 180;
+            const a = Math.sin(dLat/2) * Math.sin(dLat/2) +
+                      Math.cos(p1.lat * Math.PI / 180) * Math.cos(p2.lat * Math.PI / 180) *
+                      Math.sin(dLng/2) * Math.sin(dLng/2);
+            return R * 2 * Math.atan2(Math.sqrt(a), Math.sqrt(1-a));
+        }
+
+        function solveDeliveriesTSP(deliveries, manualFirstIdx, prioritizeSameStreet) {
+            let unvisited = [...deliveries];
+            let route = [];
+
+            if (manualFirstIdx >= 0 && manualFirstIdx < unvisited.length) {
+                let first = unvisited.splice(manualFirstIdx, 1)[0];
+                route.push(first);
+            }
+
+            while (unvisited.length > 0) {
+                let current = route.length > 0 ? route[route.length - 1] : FIXED_PK2U;
+                let currentStreetKey = route.length > 0 ? route[route.length - 1].streetKey : '';
+
+                let sameStreetCandidates = (prioritizeSameStreet && currentStreetKey) 
+                    ? unvisited.filter(p => p.streetKey && p.streetKey === currentStreetKey)
+                    : [];
+
+                let candidatePool = sameStreetCandidates.length > 0 ? sameStreetCandidates : unvisited;
+
+                let nearestIdxInUnvisited = 0;
+                let minDist = Infinity;
+
+                for (let i = 0; i < unvisited.length; i++) {
+                    let candidate = unvisited[i];
+                    if (candidatePool.includes(candidate)) {
+                        let d = haversine(current, candidate);
+                        if (d < minDist) {
+                            minDist = d;
+                            nearestIdxInUnvisited = i;
+                        }
+                    }
+                }
+
+                route.push(unvisited.splice(nearestIdxInUnvisited, 1)[0]);
+            }
+
+            function getPenaltyDist(p1, p2) {
+                let d = haversine(p1, p2);
+                if (prioritizeSameStreet && p1.streetKey && p1.streetKey === p2.streetKey) {
+                    return d - 1000.0;
+                }
+                return d;
+            }
+
+            let improved = true;
+            let count = 0;
+            let startI = (manualFirstIdx >= 0) ? 1 : 0;
+
+            while (improved && count < 50) {
+                improved = false;
+                count++;
+                for (let i = startI; i < route.length - 1; i++) {
+                    for (let j = i + 1; j < route.length; j++) {
+                        let prev = (i === 0) ? FIXED_PK2U : route[i - 1];
+                        let next = (j === route.length - 1) ? FIXED_HOME : route[j + 1];
+
+                        let d1 = getPenaltyDist(prev, route[i]) + getPenaltyDist(route[j], next);
+                        let d2 = getPenaltyDist(prev, route[j]) + getPenaltyDist(route[i], next);
+
+                        if (d2 < d1) {
+                            let segment = route.slice(i, j + 1).reverse();
+                            route.splice(i, j - i + 1, ...segment);
+                            improved = true;
+                        }
+                    }
+                }
+            }
+
+            return route;
+        }
+
+        function applyMarkerJitter(points) {
+            const threshold = 0.00012;
+            const groups = [];
+
+            points.forEach(p => {
+                p._displayLat = p.lat;
+                p._displayLng = p.lng;
+
+                let added = false;
+                for (let g of groups) {
+                    let center = g[0];
+                    let dist = Math.sqrt(Math.pow(p.lat - center.lat, 2) + Math.pow(p.lng - center.lng, 2));
+                    if (dist < threshold) {
+                        g.push(p);
+                        added = true;
+                        break;
+                    }
+                }
+                if (!added) {
+                    groups.push([p]);
+                }
+            });
+
+            groups.forEach(g => {
+                if (g.length > 1) {
+                    const stepLng = 0.00006;
+                    const totalWidth = (g.length - 1) * stepLng;
+                    const startLng = -totalWidth / 2;
+
+                    g.forEach((p, i) => {
+                        p._displayLat = p.lat;
+                        p._displayLng = p.lng + startLng + (i * stepLng);
+                    });
+                }
+            });
+        }
+
+        async function fetchDeliveryPolyline(orderedDeliveries) {
+            if (orderedDeliveries.length < 2) return null;
+            const coordinates = orderedDeliveries.map(p => [p.lng, p.lat]);
+
+            try {
+                const response = await fetch('https://api.openrouteservice.org/v2/directions/driving-car/geojson', {
+                    method: 'POST',
+                    headers: {
+                        'Authorization': ORS_API_KEY,
+                        'Content-Type': 'application/json'
+                    },
+                    body: JSON.stringify({ coordinates: coordinates })
+                });
+
+                if (response.ok) {
+                    const data = await response.json();
+                    if (data && data.features && data.features[0] && data.features[0].geometry) {
+                        return data.features[0].geometry;
+                    }
+                }
+            } catch (err) {
+                console.error("Erro ORS Polyline:", err);
+            }
+
+            return {
+                'type': 'LineString',
+                'coordinates': coordinates
+            };
+        }
+
+        async function fetchFullDayTotalDistance(orderedDeliveries) {
+            if (orderedDeliveries.length === 0) return '0';
+
+            const fullCoords = [
+                [FIXED_HOME.lng, FIXED_HOME.lat],
+                [FIXED_PK2U.lng, FIXED_PK2U.lat],
+                ...orderedDeliveries.map(p => [p.lng, p.lat]),
+                [FIXED_HOME.lng, FIXED_HOME.lat]
+            ];
+
+            try {
+                const response = await fetch('https://api.openrouteservice.org/v2/directions/driving-car/geojson', {
+                    method: 'POST',
+                    headers: {
+                        'Authorization': ORS_API_KEY,
+                        'Content-Type': 'application/json'
+                    },
+                    body: JSON.stringify({ coordinates: fullCoords })
+                });
+
+                if (response.ok) {
+                    const data = await response.json();
+                    const meters = data.features[0].properties.summary.distance;
+                    return (meters / 1000).toFixed(1);
+                }
+            } catch (err) {
+                console.error("Erro ORS Distância Total:", err);
+            }
+
+            let totalKm = haversine(FIXED_HOME, FIXED_PK2U);
+            totalKm += haversine(FIXED_PK2U, orderedDeliveries[0]);
+            for (let i = 0; i < orderedDeliveries.length - 1; i++) {
+                totalKm += haversine(orderedDeliveries[i], orderedDeliveries[i + 1]);
+            }
+            totalKm += haversine(orderedDeliveries[orderedDeliveries.length - 1], FIXED_HOME);
+            return totalKm.toFixed(1);
+        }
+
+        async function optimizeAndDrawRoute() {
+            showLoading("Otimizando e agrupando entregas por rua...");
+            
+            const firstIdx = parseInt(document.getElementById('start-point-select').value);
+            const prioritizeSameStreet = document.getElementById('prioritize-same-street').checked;
+
+            activePoints = solveDeliveriesTSP(rawData, firstIdx, prioritizeSameStreet);
+            await renderMapAndUI(activePoints, true);
+            hideLoading();
+        }
+
+        function getMarkerStyleConfig(number, status) {
+            let colorClasses = 'bg-indigo-600 text-white border-white';
+            let iconHtml = `${number}`;
+
+            if (status === 'success') {
+                colorClasses = 'bg-emerald-500 text-white border-emerald-200 ring-2 ring-emerald-400';
+                iconHtml = '<i class="fa-solid fa-check text-xs"></i>';
+            } else if (status === 'occurrence') {
+                colorClasses = 'bg-rose-600 text-white border-rose-200 ring-2 ring-rose-400';
+                iconHtml = '<i class="fa-solid fa-xmark text-xs"></i>';
+            }
+
+            return {
+                className: `flex items-center justify-center w-8 h-8 rounded-full text-xs font-bold shadow-lg border-2 cursor-pointer transition-all ${colorClasses}`,
+                innerHTML: iconHtml
+            };
+        }
+
+        function createMarkerElement(number, status) {
+            const wrapper = document.createElement('div');
+            wrapper.className = 'custom-marker-wrapper';
+
+            const inner = document.createElement('div');
+            const styleConfig = getMarkerStyleConfig(number, status);
+            inner.className = `marker-badge ${styleConfig.className}`;
+            inner.innerHTML = styleConfig.innerHTML;
+
+            wrapper.appendChild(inner);
+            return wrapper;
+        }
+
+        /* Links de Navegação Ponto a Ponto */
+        function openWaze(lat, lng) {
+            window.open(`https://waze.com/ul?ll=${lat},${lng}&navigate=yes`, '_blank');
+        }
+
+        function openGoogleMaps(lat, lng) {
+            window.open(`https://www.google.com/maps/dir/?api=1&destination=${lat},${lng}`, '_blank');
+        }
+
+        function createPopupHtml(idx, p) {
+            return `
+                <div class="p-1 max-w-xs font-sans">
+                    <span class="text-xs uppercase font-bold bg-indigo-100 text-indigo-700 px-2 py-0.5 rounded">Parada #${idx + 1}</span>
+                    <h4 class="font-bold text-slate-900 text-base mt-1.5 leading-snug">${p.spx}</h4>
+                    <p class="text-sm text-slate-700 font-medium mt-1"><i class="fa-solid fa-location-dot text-indigo-500 mr-1"></i>${p.address}</p>
+                    <p class="text-xs text-slate-500 mt-1"><strong>Bairro:</strong> ${p.bairro}</p>
+                    
+                    <!-- Botões de Navegação GPS -->
+                    <div class="grid grid-cols-2 gap-1.5 mt-2.5 pt-2 border-t border-slate-100">
+                        <button onclick="openWaze(${p.lat}, ${p.lng})" class="bg-cyan-500 hover:bg-cyan-600 text-white text-xs font-bold py-1.5 px-2 rounded-lg flex items-center justify-center space-x-1 shadow-sm">
+                            <i class="fa-solid fa-location-arrow"></i> <span>Waze</span>
+                        </button>
+                        <button onclick="openGoogleMaps(${p.lat}, ${p.lng})" class="bg-blue-600 hover:bg-blue-700 text-white text-xs font-bold py-1.5 px-2 rounded-lg flex items-center justify-center space-x-1 shadow-sm">
+                            <i class="fa-brands fa-google"></i> <span>G. Maps</span>
+                        </button>
+                    </div>
+
+                    <!-- Botões de Status -->
+                    <div class="flex space-x-1.5 mt-2">
+                        <button onclick="setDeliveryStatus(${idx}, 'success')" class="flex-1 ${p.status === 'success' ? 'bg-emerald-700 ring-2 ring-emerald-300' : 'bg-emerald-600'} hover:bg-emerald-700 text-white text-xs font-bold py-1.5 px-2 rounded-lg flex items-center justify-center space-x-1 shadow-sm">
+                            <i class="fa-solid fa-check"></i> <span>Sucesso</span>
+                        </button>
+                        <button onclick="setDeliveryStatus(${idx}, 'occurrence')" class="flex-1 ${p.status === 'occurrence' ? 'bg-rose-700 ring-2 ring-rose-300' : 'bg-rose-600'} hover:bg-rose-700 text-white text-xs font-bold py-1.5 px-2 rounded-lg flex items-center justify-center space-x-1 shadow-sm">
+                            <i class="fa-solid fa-triangle-exclamation"></i> <span>Ocorrência</span>
+                        </button>
+                    </div>
+                </div>
+            `;
+        }
+
+        async function renderMapAndUI(points, fetchRoads = true) {
+            markersMap.forEach(m => m.remove());
+            markersMap.clear();
+
+            const bounds = new maplibregl.LngLatBounds();
+            applyMarkerJitter(points);
+
+            points.forEach((p, idx) => {
+                bounds.extend([p.lng, p.lat]);
+                
+                const markerEl = createMarkerElement(idx + 1, p.status);
+                const popup = new maplibregl.Popup({ offset: 25 }).setHTML(createPopupHtml(idx, p));
+
+                const marker = new maplibregl.Marker({ element: markerEl })
+                    .setLngLat([p._displayLng, p._displayLat])
+                    .setPopup(popup)
+                    .addTo(map);
+
+                markersMap.set(idx, marker);
+            });
+
+            if (points.length > 0) {
+                map.fitBounds(bounds, { padding: 40 });
+            }
+
+            if (fetchRoads) {
+                const geom = await fetchDeliveryPolyline(points);
+                const distTotal = await fetchFullDayTotalDistance(points);
+
+                currentRouteGeometry = geom;
+                currentRouteDistanceKm = distTotal;
+
+                updateRouteOnMap();
+
+                document.getElementById('dist-badge').classList.remove('hidden');
+                document.getElementById('dist-text').textContent = `${currentRouteDistanceKm} km`;
+            } else {
+                updateRouteOnMap();
+            }
+
+            updateCounters();
+            renderSidebarList(points);
+            saveStateToLocalStorage();
+        }
+
+        function setDeliveryStatus(index, newStatus) {
+            if (!activePoints[index]) return;
+
+            if (activePoints[index].status === newStatus) {
+                activePoints[index].status = 'pending';
+            } else {
+                activePoints[index].status = newStatus;
+            }
+
+            const currentPoint = activePoints[index];
+
+            const marker = markersMap.get(index);
+            if (marker) {
+                const markerEl = marker.getElement();
+                const innerBadge = markerEl.querySelector('.marker-badge');
+                if (innerBadge) {
+                    const styleConfig = getMarkerStyleConfig(index + 1, currentPoint.status);
+                    innerBadge.className = `marker-badge ${styleConfig.className}`;
+                    innerBadge.innerHTML = styleConfig.innerHTML;
+                }
+
+                const popup = marker.getPopup();
+                if (popup) {
+                    popup.setHTML(createPopupHtml(index, currentPoint));
+                }
+            }
+
+            updateCounters();
+            renderSidebarList(activePoints);
+            saveStateToLocalStorage();
+        }
+
+        function updateCounters() {
+            const total = activePoints.length;
+            const success = activePoints.filter(p => p.status === 'success').length;
+            const occurrence = activePoints.filter(p => p.status === 'occurrence').length;
+
+            document.getElementById('cnt-total').textContent = total;
+            document.getElementById('cnt-success').textContent = success;
+            document.getElementById('cnt-occurrence').textContent = occurrence;
+        }
+
+        function renderSidebarList(points) {
+            const container = document.getElementById('stops-list-container');
+            container.innerHTML = '';
+
+            points.forEach((p, idx) => {
+                const isSuccess = p.status === 'success';
+                const isOccurrence = p.status === 'occurrence';
+
+                let cardBg = "bg-white border-slate-200";
+                if (isSuccess) cardBg = "bg-emerald-50/70 border-emerald-300";
+                if (isOccurrence) cardBg = "bg-rose-50/70 border-rose-300";
+
+                const item = document.createElement('div');
+                item.className = `p-3.5 rounded-xl border shadow-sm transition flex flex-col space-y-2.5 ${cardBg}`;
+
+                item.innerHTML = `
+                    <div class="flex items-start justify-between cursor-pointer" onclick="focusOnPoint(${idx})">
+                        <div class="flex items-start space-x-3 min-w-0">
+                            <div class="flex-shrink-0 w-7 h-7 rounded-full ${isSuccess ? 'bg-emerald-600' : isOccurrence ? 'bg-rose-600' : 'bg-indigo-600'} text-white font-bold text-xs flex items-center justify-center mt-0.5 shadow-sm">
+                                ${isSuccess ? '<i class="fa-solid fa-check"></i>' : isOccurrence ? '<i class="fa-solid fa-xmark"></i>' : idx + 1}
+                            </div>
+                            <div class="min-w-0">
+                                <p class="text-sm font-bold text-slate-900 truncate tracking-tight">${p.spx}</p>
+                                <p class="text-xs font-semibold text-slate-700 truncate leading-snug mt-0.5">${p.address}</p>
+                                <p class="text-xs font-medium text-slate-500 truncate mt-0.5"><i class="fa-solid fa-location-dot text-slate-400 mr-1"></i>${p.bairro}</p>
+                            </div>
+                        </div>
+                    </div>
+
+                    <!-- Botões de Navegação GPS para cada Entrega -->
+                    <div class="grid grid-cols-2 gap-1.5 pt-1">
+                        <button onclick="openWaze(${p.lat}, ${p.lng})" class="py-1.5 px-2 bg-cyan-500 hover:bg-cyan-600 text-white rounded-lg text-xs font-bold transition flex items-center justify-center space-x-1 shadow-sm">
+                            <i class="fa-solid fa-location-arrow"></i>
+                            <span>Waze</span>
+                        </button>
+                        <button onclick="openGoogleMaps(${p.lat}, ${p.lng})" class="py-1.5 px-2 bg-blue-600 hover:bg-blue-700 text-white rounded-lg text-xs font-bold transition flex items-center justify-center space-x-1 shadow-sm">
+                            <i class="fa-brands fa-google"></i>
+                            <span>G. Maps</span>
+                        </button>
+                    </div>
+
+                    <!-- Botões de Controle de Status -->
+                    <div class="flex space-x-2 pt-1 border-t border-slate-100/80">
+                        <button onclick="setDeliveryStatus(${idx}, 'success')" class="flex-1 py-1.5 px-2 rounded-lg text-xs font-bold transition flex items-center justify-center space-x-1.5 ${isSuccess ? 'bg-emerald-600 text-white shadow' : 'bg-slate-100 hover:bg-emerald-100 text-emerald-700'}">
+                            <i class="fa-solid fa-circle-check"></i>
+                            <span>Entregue</span>
+                        </button>
+                        <button onclick="setDeliveryStatus(${idx}, 'occurrence')" class="flex-1 py-1.5 px-2 rounded-lg text-xs font-bold transition flex items-center justify-center space-x-1.5 ${isOccurrence ? 'bg-rose-600 text-white shadow' : 'bg-slate-100 hover:bg-rose-100 text-rose-700'}">
+                            <i class="fa-solid fa-triangle-exclamation"></i>
+                            <span>Ocorrência</span>
+                        </button>
+                    </div>
+                `;
+                container.appendChild(item);
+            });
+        }
+
+        function focusOnPoint(idx) {
+            const p = activePoints[idx];
+            if (!p) return;
+
+            if (window.innerWidth < 768) {
+                switchMobileTab('map');
+            }
+
+            map.flyTo({ center: [p.lng, p.lat], zoom: 16 });
+            const marker = markersMap.get(idx);
+            if (marker) marker.togglePopup();
+        }
+
+        function escapeXml(str) {
+            if (!str) return '';
+            return String(str).replace(/[<>&'"]/g, function (c) {
+                switch (c) {
+                    case '<': return '&lt;';
+                    case '>': return '&gt;';
+                    case '&': return '&amp;';
+                    case '\'': return '&apos;';
+                    case '"': return '&quot;';
+                }
+            });
+        }
+
+        /* Exportação de Rota Completa em Formato GPX (Nativo para OsmAnd) */
+        function exportToGPX() {
+            if (!activePoints || activePoints.length === 0) {
+                alert("Nenhuma rota para exportar! Carregue a planilha primeiro.");
+                return;
+            }
+
+            const now = new Date();
+            const day = String(now.getDate()).padStart(2, '0');
+            const month = String(now.getMonth() + 1).padStart(2, '0');
+            const dateStr = `${day}-${month}-${now.getFullYear()}`;
+
+            let gpxContent = `<?xml version="1.0" encoding="UTF-8"?>\n`;
+            gpxContent += `<gpx version="1.1" creator="Roteirizador Entregas" xmlns="http://www.topografix.com/GPX/1/1">\n`;
+            gpxContent += `  <metadata>\n`;
+            gpxContent += `    <name>Rota Entregas - ${dateStr}</name>\n`;
+            gpxContent += `    <desc>Rota de entregas otimizada para o OsmAnd</desc>\n`;
+            gpxContent += `  </metadata>\n\n`;
+
+            // Waypoints numerados para cada parada no OsmAnd
+            activePoints.forEach((p, idx) => {
+                const name = `${idx + 1}. ${p.spx}`;
+                const desc = `${p.address} - ${p.bairro}`;
+
+                gpxContent += `  <wpt lat="${p.lat}" lon="${p.lng}">\n`;
+                gpxContent += `    <name>${escapeXml(name)}</name>\n`;
+                gpxContent += `    <desc>${escapeXml(desc)}</desc>\n`;
+                gpxContent += `    <sym>red-pin</sym>\n`;
+                gpxContent += `  </wpt>\n`;
+            });
+
+            // Rota sequencial (rte)
+            gpxContent += `\n  <rte>\n`;
+            gpxContent += `    <name>Sequencia de Entregas</name>\n`;
+            activePoints.forEach((p, idx) => {
+                gpxContent += `    <rtept lat="${p.lat}" lon="${p.lng}">\n`;
+                gpxContent += `      <name>${idx + 1}. ${escapeXml(p.spx)}</name>\n`;
+                gpxContent += `    </rtept>\n`;
+            });
+            gpxContent += `  </rte>\n`;
+
+            // Linha/Traçado exato das ruas se já foi calculado pelo OpenRouteService
+            if (currentRouteGeometry && currentRouteGeometry.coordinates && currentRouteGeometry.coordinates.length > 0) {
+                gpxContent += `\n  <trk>\n`;
+                gpxContent += `    <name>Tracado das Ruas</name>\n`;
+                gpxContent += `    <trkseg>\n`;
+                currentRouteGeometry.coordinates.forEach(coord => {
+                    gpxContent += `      <trkpt lat="${coord[1]}" lon="${coord[0]}"></trkpt>\n`;
+                });
+                gpxContent += `    </trkseg>\n`;
+                gpxContent += `  </trk>\n`;
+            }
+
+            gpxContent += `\n</gpx>`;
+
+            const blob = new Blob([gpxContent], { type: 'application/gpx+xml;charset=utf-8;' });
+            const url = URL.createObjectURL(blob);
+            const link = document.createElement('a');
+            link.href = url;
+            link.setAttribute('download', `Rota_OsmAnd_${dateStr}.gpx`);
+            document.body.appendChild(link);
+            link.click();
+            document.body.removeChild(link);
+            URL.revokeObjectURL(url);
+        }
+
+        function exportToXLSX() {
+            if (!activePoints || activePoints.length === 0) return;
+
+            const exportData = activePoints.map((p, idx) => ({
+                'Ordem Rota': idx + 1,
+                'Status Entrega': p.status === 'success' ? 'SUCESSO' : p.status === 'occurrence' ? 'OCORRÊNCIA' : 'PENDENTE',
+                'SPX TN': p.spx,
+                'Endereço': p.address,
+                'Bairro': p.bairro,
+                'Latitude': p.lat,
+                'Longitude': p.lng
+            }));
+
+            const ws = XLSX.utils.json_to_sheet(exportData);
+            const wb = XLSX.utils.book_new();
+            XLSX.utils.book_append_sheet(wb, ws, "Status_Entregas");
+
+            const now = new Date();
+            const day = String(now.getDate()).padStart(2, '0');
+            const month = String(now.getMonth() + 1).padStart(2, '0');
+            const year = now.getFullYear();
+            const currentDateStr = `${day}-${month}-${year}`;
+
+            XLSX.writeFile(wb, `Relatorio_Entregas_Status_${currentDateStr}.xlsx`);
+        }
+
+        function showLoading(text) {
+            document.getElementById('loading-text').textContent = text || "Carregando...";
+            document.getElementById('loading-overlay').classList.remove('hidden');
+        }
+
+        function hideLoading() {
+            document.getElementById('loading-overlay').classList.add('hidden');
+        }
+    </script>
+</body>
+</html>
