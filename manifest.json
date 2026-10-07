@@ -1,0 +1,16 @@
+{
+  "name": "Roteirizador & Entregas",
+  "short_name": "Entregas",
+  "start_url": "/nome-do-seu-repositorio/index.html",
+  "display": "standalone",
+  "background_color": "#0f172a",
+  "theme_color": "#0f172a",
+  "icons": [
+    {
+      "src": "https://cdn-icons-png.flaticon.com/512/3063/3063822.png",
+      "sizes": "512x512",
+      "type": "image/png",
+      "purpose": "any maskable"
+    }
+  ]
+}
