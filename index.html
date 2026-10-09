@@ -1,7 +1,6 @@
 <!DOCTYPE html>
 <html lang="pt-BR">
 <head>
-    <link rel="manifest" href="manifest.json">
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
     <title>Roteirizador & Controle de Entregas</title>
@@ -117,7 +116,7 @@
                         <span>Otimizar Rota</span>
                     </button>
 
-                    <!-- Novo Botão de Exportação para OsmAnd (GPX) -->
+                    <!-- Botão de Exportação para OsmAnd (GPX) -->
                     <button id="btn-export-gpx" disabled class="w-full bg-amber-600 hover:bg-amber-700 disabled:bg-slate-300 text-white text-xs font-bold py-2 px-3 rounded-lg shadow transition flex items-center justify-center space-x-1.5">
                         <i class="fa-solid fa-map-location-dot"></i>
                         <span>Exportar GPX (OsmAnd)</span>
@@ -778,36 +777,65 @@
             });
         }
 
+        /* Busca de Polyline com fatiamento para contornar o limite de 70 pontos da API */
         async function fetchDeliveryPolyline(orderedDeliveries) {
             if (orderedDeliveries.length < 2) return null;
-            const coordinates = orderedDeliveries.map(p => [p.lng, p.lat]);
+            const allCoordinates = orderedDeliveries.map(p => [p.lng, p.lat]);
 
-            try {
-                const response = await fetch('https://api.openrouteservice.org/v2/directions/driving-car/geojson', {
-                    method: 'POST',
-                    headers: {
-                        'Authorization': ORS_API_KEY,
-                        'Content-Type': 'application/json'
-                    },
-                    body: JSON.stringify({ coordinates: coordinates })
-                });
+            const CHUNK_SIZE = 50; // Limite seguro do ORS
+            const chunks = [];
 
-                if (response.ok) {
-                    const data = await response.json();
-                    if (data && data.features && data.features[0] && data.features[0].geometry) {
-                        return data.features[0].geometry;
-                    }
+            for (let i = 0; i < allCoordinates.length - 1; i += (CHUNK_SIZE - 1)) {
+                const chunk = allCoordinates.slice(i, i + CHUNK_SIZE);
+                if (chunk.length >= 2) {
+                    chunks.push(chunk);
                 }
-            } catch (err) {
-                console.error("Erro ORS Polyline:", err);
             }
 
-            return {
-                'type': 'LineString',
-                'coordinates': coordinates
-            };
+            try {
+                const promises = chunks.map(chunk => 
+                    fetch('https://api.openrouteservice.org/v2/directions/driving-car/geojson', {
+                        method: 'POST',
+                        headers: {
+                            'Authorization': ORS_API_KEY,
+                            'Content-Type': 'application/json'
+                        },
+                        body: JSON.stringify({ coordinates: chunk })
+                    }).then(res => res.ok ? res.json() : null).catch(() => null)
+                );
+
+                const results = await Promise.all(promises);
+                let combinedCoordinates = [];
+
+                results.forEach((data, index) => {
+                    const chunk = chunks[index];
+                    if (data && data.features && data.features[0] && data.features[0].geometry) {
+                        const coords = data.features[0].geometry.coordinates;
+                        if (combinedCoordinates.length > 0) {
+                            combinedCoordinates.push(...coords.slice(1));
+                        } else {
+                            combinedCoordinates.push(...coords);
+                        }
+                    } else {
+                        const appendPts = combinedCoordinates.length > 0 ? chunk.slice(1) : chunk;
+                        combinedCoordinates.push(...appendPts);
+                    }
+                });
+
+                return {
+                    'type': 'LineString',
+                    'coordinates': combinedCoordinates.length > 0 ? combinedCoordinates : allCoordinates
+                };
+            } catch (err) {
+                console.error("Erro ORS Polyline:", err);
+                return {
+                    'type': 'LineString',
+                    'coordinates': allCoordinates
+                };
+            }
         }
 
+        /* Cômputo da Distância Total do dia com fatiamento */
         async function fetchFullDayTotalDistance(orderedDeliveries) {
             if (orderedDeliveries.length === 0) return '0';
 
@@ -818,20 +846,41 @@
                 [FIXED_HOME.lng, FIXED_HOME.lat]
             ];
 
+            const CHUNK_SIZE = 50;
+            const chunks = [];
+
+            for (let i = 0; i < fullCoords.length - 1; i += (CHUNK_SIZE - 1)) {
+                const chunk = fullCoords.slice(i, i + CHUNK_SIZE);
+                if (chunk.length >= 2) {
+                    chunks.push(chunk);
+                }
+            }
+
             try {
-                const response = await fetch('https://api.openrouteservice.org/v2/directions/driving-car/geojson', {
-                    method: 'POST',
-                    headers: {
-                        'Authorization': ORS_API_KEY,
-                        'Content-Type': 'application/json'
-                    },
-                    body: JSON.stringify({ coordinates: fullCoords })
+                const promises = chunks.map(chunk => 
+                    fetch('https://api.openrouteservice.org/v2/directions/driving-car/geojson', {
+                        method: 'POST',
+                        headers: {
+                            'Authorization': ORS_API_KEY,
+                            'Content-Type': 'application/json'
+                        },
+                        body: JSON.stringify({ coordinates: chunk })
+                    }).then(res => res.ok ? res.json() : null).catch(() => null)
+                );
+
+                const results = await Promise.all(promises);
+                let totalMeters = 0;
+                let hasSuccess = false;
+
+                results.forEach(data => {
+                    if (data && data.features && data.features[0] && data.features[0].properties) {
+                        totalMeters += data.features[0].properties.summary.distance;
+                        hasSuccess = true;
+                    }
                 });
 
-                if (response.ok) {
-                    const data = await response.json();
-                    const meters = data.features[0].properties.summary.distance;
-                    return (meters / 1000).toFixed(1);
+                if (hasSuccess) {
+                    return (totalMeters / 1000).toFixed(1);
                 }
             } catch (err) {
                 console.error("Erro ORS Distância Total:", err);
@@ -1139,7 +1188,7 @@
             });
             gpxContent += `  </rte>\n`;
 
-            // Linha/Traçado exato das ruas se já foi calculado pelo OpenRouteService
+            // Linha/Traçado exato das ruas
             if (currentRouteGeometry && currentRouteGeometry.coordinates && currentRouteGeometry.coordinates.length > 0) {
                 gpxContent += `\n  <trk>\n`;
                 gpxContent += `    <name>Tracado das Ruas</name>\n`;
