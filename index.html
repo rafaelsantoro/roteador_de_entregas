@@ -24,13 +24,13 @@
         #map-panel { min-height: 0; position: relative; }
         #map { position: absolute; top: 0; bottom: 0; width: 100%; height: 100%; }
 
-        /* Animação do pulso do ícone do entregador */
+        /* Animação do pulso do ícone amarelado do entregador */
         .driver-pulse {
-            box-shadow: 0 0 0 0 rgba(239, 68, 68, 0.7);
+            box-shadow: 0 0 0 0 rgba(250, 204, 21, 0.8);
             animation: pulse-ring 1.8s infinite cubic-bezier(0.66, 0, 0, 1);
         }
         @keyframes pulse-ring {
-            to { box-shadow: 0 0 0 16px rgba(239, 68, 68, 0); }
+            to { box-shadow: 0 0 0 16px rgba(250, 204, 21, 0); }
         }
     </style>
 </head>
@@ -286,7 +286,7 @@
                     { enableHighAccuracy: true, maximumAge: 1000, timeout: 12000 }
                 );
 
-                btn.className = "absolute bottom-36 right-3 z-20 w-11 h-11 bg-indigo-600 text-white backdrop-blur-md rounded-full shadow-2xl border-2 border-white flex items-center justify-center text-lg active:scale-95 transition";
+                btn.className = "absolute bottom-36 right-3 z-20 w-11 h-11 bg-amber-400 text-slate-950 backdrop-blur-md rounded-full shadow-2xl border-2 border-white flex items-center justify-center text-lg active:scale-95 transition";
                 icon.className = "fa-solid fa-location-arrow animate-pulse";
             }
         }
@@ -300,9 +300,12 @@
             if (!driverMarker) {
                 const el = document.createElement('div');
                 el.className = 'custom-marker-wrapper';
+                // Triângulo estilizado amarelo de bússola/navegação
                 el.innerHTML = `
-                    <div class="driver-pulse w-10 h-10 rounded-full bg-indigo-600 border-2 border-white text-white shadow-2xl flex items-center justify-center text-sm transition-transform duration-300">
-                        <i class="fa-solid fa-car-side" id="driver-car-icon"></i>
+                    <div class="driver-pulse w-9 h-9 rounded-full bg-slate-900/95 border-2 border-amber-400 shadow-2xl flex items-center justify-center">
+                        <svg id="driver-arrow-icon" class="w-5 h-5 text-amber-400 transition-transform duration-200" viewBox="0 0 24 24" fill="currentColor" style="transform-origin: center;">
+                            <path d="M12 2L21 21L12 17L3 21L12 2Z"/>
+                        </svg>
                     </div>
                 `;
 
@@ -315,10 +318,11 @@
                 driverMarker.setLngLat([lng, lat]);
             }
 
+            // Aponta a seta no sentido da bússola (heading)
             if (heading !== null && heading !== undefined && !isNaN(heading)) {
-                const carIcon = document.getElementById('driver-car-icon');
-                if (carIcon) {
-                    carIcon.style.transform = `rotate(${heading}deg)`;
+                const arrowIcon = document.getElementById('driver-arrow-icon');
+                if (arrowIcon) {
+                    arrowIcon.style.transform = `rotate(${heading}deg)`;
                 }
             }
         }
@@ -777,12 +781,12 @@
             });
         }
 
-        /* Busca de Polyline com fatiamento para contornar o limite de 70 pontos da API */
+        /* Busca de Polyline com fatiamento em lotes para contornar o limite do ORS */
         async function fetchDeliveryPolyline(orderedDeliveries) {
             if (orderedDeliveries.length < 2) return null;
             const allCoordinates = orderedDeliveries.map(p => [p.lng, p.lat]);
 
-            const CHUNK_SIZE = 50; // Limite seguro do ORS
+            const CHUNK_SIZE = 50;
             const chunks = [];
 
             for (let i = 0; i < allCoordinates.length - 1; i += (CHUNK_SIZE - 1)) {
