@@ -14,7 +14,6 @@
 	
 	<link rel="manifest" href="manifest.json">
 
-    
     <style>
         .custom-scroll::-webkit-scrollbar { width: 5px; }
         .custom-scroll::-webkit-scrollbar-thumb { background: #cbd5e1; border-radius: 4px; }
@@ -208,7 +207,7 @@
                 <div id="search-results-list" class="max-h-40 overflow-y-auto space-y-1 text-xs custom-scroll"></div>
             </div>
 
-            <!-- Botão Flutuante de Pesquisa de Endereço (Acima do 3D) -->
+            <!-- Botão Flutuante de Pesquisa de Endereço -->
             <button id="btn-search-toggle" onclick="toggleSearchBox()" title="Pesquisar Endereço" class="absolute bottom-72 right-3 z-20 w-11 h-11 bg-slate-900/90 hover:bg-slate-800 text-slate-300 backdrop-blur-md rounded-full shadow-2xl border border-slate-700 flex items-center justify-center text-base active:scale-95 transition">
                 <i class="fa-solid fa-magnifying-glass"></i>
             </button>
@@ -275,7 +274,7 @@
 
         let rawData = [];
         let activePoints = [];
-        let map;
+        let map = null;
         let markersMap = new Map();
         let currentRouteGeometry = null;
         let currentRouteDistanceKm = '0';
@@ -294,37 +293,60 @@
         let driverMarker = null;
         let searchMarker = null;
 
+        let isTextBoosted = false;
+
         document.addEventListener('DOMContentLoaded', () => {
             if (window.location.protocol === 'file:') {
                 const warnBox = document.getElementById('file-protocol-warning');
                 if (warnBox) warnBox.classList.remove('hidden');
             }
 
-            map = new maplibregl.Map({
-                container: 'map',
-                style: LIGHT_THEME_URL,
-                center: [-48.945, -23.107],
-                zoom: 13,
-                pixelRatio: window.devicePixelRatio || 2
-            });
-
-            map.addControl(new maplibregl.NavigationControl({ showCompass: false }), 'bottom-right');
-
-			map.on('style.load', () => {
-				isTextBoosted = false; // Permite aplicar a ampliação no novo estilo carregado
-				try {
-					boostMapTextLabels();
-				} catch(e) {}
-				updateRouteOnMap();
-			});
-
-            map.on('load', () => {
-                loadStateFromLocalStorage();
-            });
-
             setupEvents();
             setupDeviceOrientation();
+
+            // Inicialização Segura e Protegida do Mapa para Dispositivos Motorola (Evita trava no WebGL)
+            window.requestAnimationFrame(() => {
+                setTimeout(() => {
+                    initMapSafely();
+                }, 100);
+            });
         });
+
+        function initMapSafely() {
+            try {
+                if (typeof maplibregl === 'undefined' || !maplibregl.supported()) {
+                    console.warn("WebGL ou MapLibre não suportado nesta WebView.");
+                    loadStateFromLocalStorage();
+                    return;
+                }
+
+                map = new maplibregl.Map({
+                    container: 'map',
+                    style: LIGHT_THEME_URL,
+                    center: [-48.945, -23.107],
+                    zoom: 13,
+                    pixelRatio: Math.min(window.devicePixelRatio || 1, 2)
+                });
+
+                map.addControl(new maplibregl.NavigationControl({ showCompass: false }), 'bottom-right');
+
+                map.on('style.load', () => {
+                    isTextBoosted = false;
+                    try {
+                        boostMapTextLabels();
+                    } catch(e) {}
+                    updateRouteOnMap();
+                });
+
+                map.on('load', () => {
+                    loadStateFromLocalStorage();
+                });
+
+            } catch (err) {
+                console.error("Erro ao inicializar o mapa MapLibre:", err);
+                loadStateFromLocalStorage();
+            }
+        }
 
         function toggleMenuConfig() {
             const menuBox = document.getElementById('collapsible-menu');
@@ -385,30 +407,32 @@
 
             const safeName = name.replace(/'/g, "\\'").replace(/"/g, '&quot;');
 
-            searchMarker = new maplibregl.Marker({ element: el })
-                .setLngLat([lng, lat])
-                .setPopup(new maplibregl.Popup({ closeButton: false, offset: 25 }).setHTML(`
-                    <div class="p-1 max-w-xs font-sans">
-                        <h4 class="font-bold text-slate-900 text-xs truncate">${name.substring(0, 45)}...</h4>
-                        <div class="grid grid-cols-3 gap-1 mt-2.5">
-                            <button onclick="navigateToSearchLocation(${lat}, ${lng}, '${safeName}')" class="bg-amber-500 hover:bg-amber-600 text-slate-950 text-[10px] font-bold py-1.5 px-1 rounded-lg flex items-center justify-center space-x-1 shadow-sm">
-                                <i class="fa-solid fa-compass"></i> <span>App</span>
-                            </button>
-                            <button onclick="openWaze(${lat}, ${lng})" class="bg-cyan-500 hover:bg-cyan-600 text-white text-[10px] font-bold py-1.5 px-1 rounded-lg flex items-center justify-center space-x-1 shadow-sm">
-                                <i class="fa-solid fa-location-arrow"></i> <span>Waze</span>
-                            </button>
-                            <button onclick="openGoogleMaps(${lat}, ${lng})" class="bg-blue-600 hover:bg-blue-700 text-white text-[10px] font-bold py-1.5 px-1 rounded-lg flex items-center justify-center space-x-1 shadow-sm">
-                                <i class="fa-brands fa-google"></i> <span>G. Maps</span>
-                            </button>
+            if (map) {
+                searchMarker = new maplibregl.Marker({ element: el })
+                    .setLngLat([lng, lat])
+                    .setPopup(new maplibregl.Popup({ closeButton: false, offset: 25 }).setHTML(`
+                        <div class="p-1 max-w-xs font-sans">
+                            <h4 class="font-bold text-slate-900 text-xs truncate">${name.substring(0, 45)}...</h4>
+                            <div class="grid grid-cols-3 gap-1 mt-2.5">
+                                <button onclick="navigateToSearchLocation(${lat}, ${lng}, '${safeName}')" class="bg-amber-500 hover:bg-amber-600 text-slate-950 text-[10px] font-bold py-1.5 px-1 rounded-lg flex items-center justify-center space-x-1 shadow-sm">
+                                    <i class="fa-solid fa-compass"></i> <span>App</span>
+                                </button>
+                                <button onclick="openWaze(${lat}, ${lng})" class="bg-cyan-500 hover:bg-cyan-600 text-white text-[10px] font-bold py-1.5 px-1 rounded-lg flex items-center justify-center space-x-1 shadow-sm">
+                                    <i class="fa-solid fa-location-arrow"></i> <span>Waze</span>
+                                </button>
+                                <button onclick="openGoogleMaps(${lat}, ${lng})" class="bg-blue-600 hover:bg-blue-700 text-white text-[10px] font-bold py-1.5 px-1 rounded-lg flex items-center justify-center space-x-1 shadow-sm">
+                                    <i class="fa-brands fa-google"></i> <span>G. Maps</span>
+                                </button>
+                            </div>
                         </div>
-                    </div>
-                `))
-                .addTo(map);
+                    `))
+                    .addTo(map);
+
+                map.flyTo({ center: [lng, lat], zoom: 16.5 });
+                searchMarker.togglePopup();
+            }
 
             if (window.innerWidth < 768) switchMobileTab('map');
-
-            map.flyTo({ center: [lng, lat], zoom: 16.5 });
-            searchMarker.togglePopup();
         }
 
         async function navigateToSearchLocation(lat, lng, name) {
@@ -418,7 +442,6 @@
 
             isCustomSearchNav = true;
 
-            // Esconde botoes de entrega e exibe botao de Cancelar Trajeto
             document.getElementById('nav-delivery-actions').classList.add('hidden');
             document.getElementById('nav-custom-search-actions').classList.remove('hidden');
 
@@ -494,30 +517,22 @@
             }
         }
 
-        /* Cancela a rota do endereço pesquisado e mantem o GPS funcionando normalmente */
         function cancelCustomSearchRoute() {
             isCustomSearchNav = false;
-
-            // Remove o traçado da rota do mapa
             currentRouteGeometry = null;
             updateRouteOnMap();
 
-            // Oculta o marcador da pesquisa
             if (searchMarker) {
                 searchMarker.remove();
                 searchMarker = null;
             }
 
-            // Oculta o painel superior de orientação
             document.getElementById('nav-header-panel').classList.add('hidden');
-
-            // Restaura o estado padrão dos botões para futuras entregas
             document.getElementById('nav-custom-search-actions').classList.add('hidden');
             document.getElementById('nav-delivery-actions').classList.remove('hidden');
             document.getElementById('nav-next-label').textContent = 'Próximo Destino';
         }
 
-        /* Pula a entrega atual e ajusta a rota para a próxima pendente mantendo status pendente */
         function skipCurrentDelivery() {
             if (!activePoints || activePoints.length === 0) return;
 
@@ -619,53 +634,43 @@
             } catch(e) {}
         }
 
-	function setupDeviceOrientation() {
-		// Bússola simplificada para evitar alertas de APIs obsoletas no navegador
-		if (window.DeviceOrientationEvent && typeof DeviceOrientationEvent.requestPermission === 'function') {
-			// Apenas ativa se o dispositivo exigir permissão explícita
-		}
-	}
+        function setupDeviceOrientation() {
+            // Evita uso de APIs obsoletas
+        }
 
-	let isTextBoosted = false;
+        function boostMapTextLabels() {
+            if (!map || isTextBoosted) return;
+            const style = map.getStyle();
+            if (!style || !style.layers) return;
 
-	function boostMapTextLabels() {
-		if (!map || isTextBoosted) return;
-		const style = map.getStyle();
-		if (!style || !style.layers) return;
+            const scaleFactor = 1.65;
 
-		const scaleFactor = 1.65;
+            style.layers.forEach(layer => {
+                if (layer.type === 'symbol' && layer.layout && layer.layout['text-field']) {
+                    try {
+                        const currentSize = map.getLayoutProperty(layer.id, 'text-size');
+                        if (currentSize === undefined || currentSize === null) {
+                            map.setLayoutProperty(layer.id, 'text-size', 16 * scaleFactor);
+                            return;
+                        }
 
-		style.layers.forEach(layer => {
-			if (layer.type === 'symbol' && layer.layout && layer.layout['text-field']) {
-				try {
-					const currentSize = map.getLayoutProperty(layer.id, 'text-size');
-					if (currentSize === undefined || currentSize === null) {
-						map.setLayoutProperty(layer.id, 'text-size', 16 * scaleFactor);
-						return;
-					}
+                        if (typeof currentSize === 'object' && !Array.isArray(currentSize) && currentSize.stops) {
+                            const newStops = currentSize.stops.map(st => [st[0], Number((st[1] * scaleFactor).toFixed(2))]);
+                            map.setLayoutProperty(layer.id, 'text-size', { ...currentSize, stops: newStops });
+                        } 
+                        else if (typeof currentSize === 'number') {
+                            map.setLayoutProperty(layer.id, 'text-size', Number((currentSize * scaleFactor).toFixed(2)));
+                        } 
+                        else if (Array.isArray(currentSize)) {
+                            if (currentSize[0] === '*' && currentSize[1] === scaleFactor) return;
+                            map.setLayoutProperty(layer.id, 'text-size', ['*', scaleFactor, currentSize]);
+                        }
+                    } catch (e) {}
+                }
+            });
 
-					// 1. Se for um Objeto legado do Mapbox/Carto com "stops" (ex: { stops: [[10, 8], [14, 12]] })
-					if (typeof currentSize === 'object' && !Array.isArray(currentSize) && currentSize.stops) {
-						const newStops = currentSize.stops.map(st => [st[0], Number((st[1] * scaleFactor).toFixed(2))]);
-						map.setLayoutProperty(layer.id, 'text-size', { ...currentSize, stops: newStops });
-					} 
-					// 2. Se for um Número simples
-					else if (typeof currentSize === 'number') {
-						map.setLayoutProperty(layer.id, 'text-size', Number((currentSize * scaleFactor).toFixed(2)));
-					} 
-					// 3. Se for uma Expressão no formato de Array (ex: ["interpolate", ...])
-					else if (Array.isArray(currentSize)) {
-						if (currentSize[0] === '*' && currentSize[1] === scaleFactor) return; // Evita duplicação
-						map.setLayoutProperty(layer.id, 'text-size', ['*', scaleFactor, currentSize]);
-					}
-				} catch (e) {
-					// Ignores camadas que não aceitam alteração dinâmica de tamanho
-				}
-			}
-		});
-
-		isTextBoosted = true;
-	}
+            isTextBoosted = true;
+        }
 
         function toggleGPS() {
             const btn = document.getElementById('btn-gps-toggle');
@@ -751,33 +756,32 @@
 
             lastGpsCoords = { lat, lng };
 
-            if (!driverMarker) {
-                const el = document.createElement('div');
-                el.className = 'custom-marker-wrapper';
-                el.innerHTML = `
-                    <div class="driver-pulse w-9 h-9 rounded-full bg-slate-900/95 border-2 border-amber-400 shadow-2xl flex items-center justify-center">
-                        <svg id="driver-arrow-icon" class="w-5 h-5 text-amber-400 transition-transform duration-200" viewBox="0 0 24 24" fill="currentColor" style="transform-origin: center;">
-                            <path d="M12 2L21 21L12 17L3 21L12 2Z"/>
-                        </svg>
-                    </div>
-                `;
+            if (map) {
+                if (!driverMarker) {
+                    const el = document.createElement('div');
+                    el.className = 'custom-marker-wrapper';
+                    el.innerHTML = `
+                        <div class="driver-pulse w-9 h-9 rounded-full bg-slate-900/95 border-2 border-amber-400 shadow-2xl flex items-center justify-center">
+                            <svg id="driver-arrow-icon" class="w-5 h-5 text-amber-400 transition-transform duration-200" viewBox="0 0 24 24" fill="currentColor" style="transform-origin: center;">
+                                <path d="M12 2L21 21L12 17L3 21L12 2Z"/>
+                            </svg>
+                        </div>
+                    `;
 
-                driverMarker = new maplibregl.Marker({ element: el })
-                    .setLngLat([lng, lat])
-                    .addTo(map);
-            } else {
-                driverMarker.setLngLat([lng, lat]);
+                    driverMarker = new maplibregl.Marker({ element: el })
+                        .setLngLat([lng, lat])
+                        .addTo(map);
+                } else {
+                    driverMarker.setLngLat([lng, lat]);
+                }
             }
 
-            /* No modo de navegação, como o mapa se rotaciona na direção de movimento,
-               a seta permanece sempre virada para a frente (0° relativo à tela). */
             const arrowIcon = document.getElementById('driver-arrow-icon');
             if (arrowIcon) {
                 const arrowRotation = isNavMode ? 0 : smoothedHeading;
                 arrowIcon.style.transform = `rotate(${arrowRotation}deg)`;
             }
 
-            /* Remoção gradual da linha de rota atrás do veículo em tempo real */
             if (isNavMode && currentRouteGeometry && currentRouteGeometry.coordinates && currentRouteGeometry.coordinates.length > 1) {
                 const coords = currentRouteGeometry.coordinates;
                 let closestIdx = 0;
@@ -826,7 +830,7 @@
             let msg = "Erro ao obter localização.";
             switch(err.code) {
                 case err.PERMISSION_DENIED:
-                    msg = "A permissão de localização foi negada no navegador.\n\nAtive a permissão de GPS para utilizar a navegação em tempo real.";
+                    msg = "A permissão de localização foi negada.\n\nAtive a permissão de GPS para utilizar a navegação.";
                     break;
                 case err.POSITION_UNAVAILABLE:
                     msg = "Sinal de GPS indisponível no momento.";
@@ -889,13 +893,15 @@
                 distBadge.classList.remove('hidden');
                 if (topNavBtnText) topNavBtnText.textContent = "Navegação";
 
-                map.easeTo({
-                    bearing: 0,
-                    pitch: 0,
-                    padding: { top: 0, bottom: 0, left: 0, right: 0 },
-                    zoom: 13,
-                    duration: 800
-                });
+                if (map) {
+                    map.easeTo({
+                        bearing: 0,
+                        pitch: 0,
+                        padding: { top: 0, bottom: 0, left: 0, right: 0 },
+                        zoom: 13,
+                        duration: 800
+                    });
+                }
 
                 updateRouteOnMap();
             }
@@ -1124,23 +1130,27 @@
         function saveStateToLocalStorage() {
             if (!activePoints || activePoints.length === 0) return;
 
-            const state = {
-                rawData: rawData,
-                activePoints: activePoints,
-                startIdx: document.getElementById('start-point-select').value,
-                prioritizeSameStreet: document.getElementById('prioritize-same-street').checked,
-                routeGeometry: currentRouteGeometry,
-                routeDistanceKm: currentRouteDistanceKm
-            };
+            try {
+                const state = {
+                    rawData: rawData,
+                    activePoints: activePoints,
+                    startIdx: document.getElementById('start-point-select').value,
+                    prioritizeSameStreet: document.getElementById('prioritize-same-street').checked,
+                    routeGeometry: currentRouteGeometry,
+                    routeDistanceKm: currentRouteDistanceKm
+                };
 
-            localStorage.setItem(STORAGE_KEY, JSON.stringify(state));
+                localStorage.setItem(STORAGE_KEY, JSON.stringify(state));
+            } catch(e) {
+                console.warn("Aviso: Não foi possível gravar no localStorage na WebView:", e);
+            }
         }
 
         function loadStateFromLocalStorage() {
-            const saved = localStorage.getItem(STORAGE_KEY);
-            if (!saved) return;
-
             try {
+                const saved = localStorage.getItem(STORAGE_KEY);
+                if (!saved) return;
+
                 const state = JSON.parse(saved);
                 if (!state.rawData || state.rawData.length === 0) return;
 
@@ -1173,8 +1183,7 @@
                     document.getElementById('dist-text').textContent = `${currentRouteDistanceKm} km`;
                 }
             } catch (e) {
-                console.error("Erro local storage:", e);
-                localStorage.removeItem(STORAGE_KEY);
+                console.warn("Aviso: Falha ou restrição no localStorage:", e);
             }
         }
 
@@ -1213,7 +1222,10 @@
         }
 
         function handleFile(file) {
-            localStorage.removeItem(STORAGE_KEY);
+            try {
+                localStorage.removeItem(STORAGE_KEY);
+            } catch(e) {}
+
             currentRouteGeometry = null;
             currentRouteDistanceKm = '0';
             updateRouteOnMap();
@@ -1294,10 +1306,6 @@
             if (rawData.length === 0) {
                 alert("Nenhuma coordenada válida encontrada na planilha! Verifique se as colunas Latitude e Longitude estão preenchidas.");
                 return;
-            }
-
-            if (skippedCount > 0) {
-                console.warn(`${skippedCount} linhas foram ignoradas por não conterem Latitude/Longitude válidas.`);
             }
 
             populateSelect(rawData);
@@ -1487,7 +1495,6 @@
                     'coordinates': combinedCoordinates.length > 0 ? combinedCoordinates : allCoordinates
                 };
             } catch (err) {
-                console.warn("Sem internet / Sinal oscilando. Utilizando traçado estimado.");
                 return {
                     'type': 'LineString',
                     'coordinates': allCoordinates
@@ -1654,15 +1661,17 @@
                 const markerEl = createMarkerElement(idx + 1, p.status);
                 const popup = new maplibregl.Popup({ closeButton: false, offset: 25 }).setHTML(createPopupHtml(idx, p));
 
-                const marker = new maplibregl.Marker({ element: markerEl })
-                    .setLngLat([p._displayLng, p._displayLat])
-                    .setPopup(popup)
-                    .addTo(map);
+                if (map) {
+                    const marker = new maplibregl.Marker({ element: markerEl })
+                        .setLngLat([p._displayLng, p._displayLat])
+                        .setPopup(popup)
+                        .addTo(map);
 
-                markersMap.set(idx, marker);
+                    markersMap.set(idx, marker);
+                }
             });
 
-            if (points.length > 0 && !isNavMode) {
+            if (points.length > 0 && !isNavMode && map) {
                 map.fitBounds(bounds, { padding: 40 });
             }
 
@@ -1804,9 +1813,11 @@
                 switchMobileTab('map');
             }
 
-            map.flyTo({ center: [p.lng, p.lat], zoom: 16 });
-            const marker = markersMap.get(idx);
-            if (marker) marker.togglePopup();
+            if (map) {
+                map.flyTo({ center: [p.lng, p.lat], zoom: 16 });
+                const marker = markersMap.get(idx);
+                if (marker) marker.togglePopup();
+            }
         }
 
         function escapeXml(str) {
@@ -1919,14 +1930,15 @@
             document.getElementById('loading-overlay').classList.add('hidden');
         }
     </script>
-	<script>
-    if ('serviceWorker' in navigator) {
-        window.addEventListener('load', () => {
-            navigator.serviceWorker.register('./sw.js')
-                .then(reg => console.log('Service Worker registrado com sucesso!'))
-                .catch(err => console.error('Erro ao registrar Service Worker:', err));
-        });
-    }
-	</script>
+
+    <script>
+        if ('serviceWorker' in navigator && window.location.protocol.startsWith('http')) {
+            window.addEventListener('load', () => {
+                navigator.serviceWorker.register('./sw.js')
+                    .then(reg => console.log('Service Worker registrado com sucesso!'))
+                    .catch(err => console.warn('Aviso Service Worker:', err));
+            });
+        }
+    </script>
 </body>
 </html>
