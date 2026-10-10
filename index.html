@@ -5,14 +5,13 @@
     <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
     <title>Roteirizador & Controle de Entregas</title>
 
-
-    
 	<!-- AGORA (Arquivos locais do seu próprio repositório) -->
 	<script src="lib/tailwindcss.js"></script>
 	<link href="lib/maplibre-gl.css" rel="stylesheet" />
 	<script src="lib/maplibre-gl.js"></script>
 	<script src="lib/xlsx.full.min.js"></script>
 	<link rel="stylesheet" href="lib/fontawesome/all.min.css">
+
     
     <style>
         .custom-scroll::-webkit-scrollbar { width: 5px; }
@@ -309,12 +308,13 @@
 
             map.addControl(new maplibregl.NavigationControl({ showCompass: false }), 'bottom-right');
 
-            map.on('style.load', () => {
-                try {
-                    boostMapTextLabels();
-                } catch(e) {}
-                updateRouteOnMap();
-            });
+			map.on('style.load', () => {
+				isTextBoosted = false; // Permite aplicar a ampliação no novo estilo carregado
+				try {
+					boostMapTextLabels();
+				} catch(e) {}
+				updateRouteOnMap();
+			});
 
             map.on('load', () => {
                 loadStateFromLocalStorage();
@@ -633,29 +633,46 @@
             }
         }
 
-        function boostMapTextLabels() {
-            if (!map) return;
-            const style = map.getStyle();
-            if (!style || !style.layers) return;
+	let isTextBoosted = false;
 
-            const scaleFactor = 1.65;
+	function boostMapTextLabels() {
+		if (!map || isTextBoosted) return;
+		const style = map.getStyle();
+		if (!style || !style.layers) return;
 
-            style.layers.forEach(layer => {
-                if (layer.type === 'symbol' && layer.layout && layer.layout['text-field']) {
-                    try {
-                        const currentSize = map.getLayoutProperty(layer.id, 'text-size');
-                        if (currentSize !== undefined && currentSize !== null) {
-                            if (Array.isArray(currentSize) && currentSize[0] === '*' && currentSize[1] === scaleFactor) {
-                                return;
-                            }
-                            map.setLayoutProperty(layer.id, 'text-size', ['*', scaleFactor, currentSize]);
-                        } else {
-                            map.setLayoutProperty(layer.id, 'text-size', 16);
-                        }
-                    } catch (e) {}
-                }
-            });
-        }
+		const scaleFactor = 1.65;
+
+		style.layers.forEach(layer => {
+			if (layer.type === 'symbol' && layer.layout && layer.layout['text-field']) {
+				try {
+					const currentSize = map.getLayoutProperty(layer.id, 'text-size');
+					if (currentSize === undefined || currentSize === null) {
+						map.setLayoutProperty(layer.id, 'text-size', 16 * scaleFactor);
+						return;
+					}
+
+					// 1. Se for um Objeto legado do Mapbox/Carto com "stops" (ex: { stops: [[10, 8], [14, 12]] })
+					if (typeof currentSize === 'object' && !Array.isArray(currentSize) && currentSize.stops) {
+						const newStops = currentSize.stops.map(st => [st[0], Number((st[1] * scaleFactor).toFixed(2))]);
+						map.setLayoutProperty(layer.id, 'text-size', { ...currentSize, stops: newStops });
+					} 
+					// 2. Se for um Número simples
+					else if (typeof currentSize === 'number') {
+						map.setLayoutProperty(layer.id, 'text-size', Number((currentSize * scaleFactor).toFixed(2)));
+					} 
+					// 3. Se for uma Expressão no formato de Array (ex: ["interpolate", ...])
+					else if (Array.isArray(currentSize)) {
+						if (currentSize[0] === '*' && currentSize[1] === scaleFactor) return; // Evita duplicação
+						map.setLayoutProperty(layer.id, 'text-size', ['*', scaleFactor, currentSize]);
+					}
+				} catch (e) {
+					// Ignores camadas que não aceitam alteração dinâmica de tamanho
+				}
+			}
+		});
+
+		isTextBoosted = true;
+	}
 
         function toggleGPS() {
             const btn = document.getElementById('btn-gps-toggle');
