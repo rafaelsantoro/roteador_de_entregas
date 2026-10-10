@@ -638,39 +638,46 @@
             // Evita uso de APIs obsoletas
         }
 
-        function boostMapTextLabels() {
-            if (!map || isTextBoosted) return;
-            const style = map.getStyle();
-            if (!style || !style.layers) return;
+		let isTextBoosted = false;
 
-            const scaleFactor = 1.65;
+		function boostMapTextLabels() {
+			if (!map || isTextBoosted) return;
+			const style = map.getStyle();
+			if (!style || !style.layers) return;
 
-            style.layers.forEach(layer => {
-                if (layer.type === 'symbol' && layer.layout && layer.layout['text-field']) {
-                    try {
-                        const currentSize = map.getLayoutProperty(layer.id, 'text-size');
-                        if (currentSize === undefined || currentSize === null) {
-                            map.setLayoutProperty(layer.id, 'text-size', 16 * scaleFactor);
-                            return;
-                        }
+			const scaleFactor = 1.35; // Aumento suave de 35% nos textos
 
-                        if (typeof currentSize === 'object' && !Array.isArray(currentSize) && currentSize.stops) {
-                            const newStops = currentSize.stops.map(st => [st[0], Number((st[1] * scaleFactor).toFixed(2))]);
-                            map.setLayoutProperty(layer.id, 'text-size', { ...currentSize, stops: newStops });
-                        } 
-                        else if (typeof currentSize === 'number') {
-                            map.setLayoutProperty(layer.id, 'text-size', Number((currentSize * scaleFactor).toFixed(2)));
-                        } 
-                        else if (Array.isArray(currentSize)) {
-                            if (currentSize[0] === '*' && currentSize[1] === scaleFactor) return;
-                            map.setLayoutProperty(layer.id, 'text-size', ['*', scaleFactor, currentSize]);
-                        }
-                    } catch (e) {}
-                }
-            });
+			style.layers.forEach(layer => {
+				if (layer.type === 'symbol' && layer.layout && layer.layout['text-field']) {
+					try {
+						const currentSize = map.getLayoutProperty(layer.id, 'text-size');
+						if (currentSize === undefined || currentSize === null) return;
 
-            isTextBoosted = true;
-        }
+						// 1. Caso seja um Número simples
+						if (typeof currentSize === 'number') {
+							map.setLayoutProperty(layer.id, 'text-size', Number((currentSize * scaleFactor).toFixed(2)));
+						} 
+						// 2. Caso seja um Objeto legado com stops
+						else if (typeof currentSize === 'object' && !Array.isArray(currentSize) && currentSize.stops) {
+							const newStops = currentSize.stops.map(st => [st[0], Number((st[1] * scaleFactor).toFixed(2))]);
+							map.setLayoutProperty(layer.id, 'text-size', { ...currentSize, stops: newStops });
+						} 
+						// 3. Caso seja um Array de expressão MapLibre ["interpolate", ...]
+						else if (Array.isArray(currentSize) && currentSize[0] === 'interpolate') {
+							const newExpr = [...currentSize];
+							for (let i = 4; i < newExpr.length; i += 2) {
+								if (typeof newExpr[i] === 'number') {
+									newExpr[i] = Number((newExpr[i] * scaleFactor).toFixed(2));
+								}
+							}
+							map.setLayoutProperty(layer.id, 'text-size', newExpr);
+						}
+					} catch (e) {}
+				}
+			});
+
+			isTextBoosted = true;
+		}
 
         function toggleGPS() {
             const btn = document.getElementById('btn-gps-toggle');
