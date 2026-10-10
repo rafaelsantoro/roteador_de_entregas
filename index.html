@@ -617,21 +617,12 @@
             } catch(e) {}
         }
 
-        function setupDeviceOrientation() {
-            if (window.DeviceOrientationEvent) {
-                window.addEventListener('deviceorientation', (e) => {
-                    let compass = null;
-                    if (e.webkitCompassHeading) {
-                        compass = e.webkitCompassHeading;
-                    } else if (e.alpha !== null) {
-                        compass = 360 - e.alpha;
-                    }
-                    if (compass !== null && !isNaN(compass)) {
-                        deviceAlphaHeading = (compass + 360) % 360;
-                    }
-                }, true);
-            }
-        }
+	function setupDeviceOrientation() {
+		// Bússola simplificada para evitar alertas de APIs obsoletas no navegador
+		if (window.DeviceOrientationEvent && typeof DeviceOrientationEvent.requestPermission === 'function') {
+			// Apenas ativa se o dispositivo exigir permissão explícita
+		}
+	}
 
 	let isTextBoosted = false;
 
