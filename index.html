@@ -12,6 +12,9 @@
 	<script src="lib/xlsx.full.min.js"></script>
 	<link rel="stylesheet" href="lib/fontawesome/all.min.css">
 	
+	<!-- Leitor de QR Code JS -->
+	<script src="https://unpkg.com/html5-qrcode"></script>
+
 	<link rel="manifest" href="manifest.json">
 
     <style>
@@ -164,21 +167,26 @@
                         </label>
                     </div>
 
-                    <!-- Action Buttons inside Collapsible Menu -->
-                    <div class="space-y-1.5 pt-1">
-                        <button id="btn-optimize" disabled class="w-full bg-indigo-600 hover:bg-indigo-700 disabled:bg-slate-300 text-white text-xs font-bold py-2 px-3 rounded-lg shadow transition flex items-center justify-center space-x-1.5">
+                    <!-- Action Buttons inside Collapsible Menu (Grid 2 colunas) -->
+                    <div class="grid grid-cols-2 gap-1.5 pt-1">
+                        <button id="btn-optimize" disabled class="w-full bg-indigo-600 hover:bg-indigo-700 disabled:bg-slate-300 disabled:text-slate-500 text-white text-xs font-bold py-2 px-2 rounded-lg shadow transition flex items-center justify-center space-x-1 truncate">
                             <i class="fa-solid fa-route"></i>
-                            <span>Otimizar Rota</span>
+                            <span class="truncate">Otimizar Rota</span>
                         </button>
 
-                        <button id="btn-export-gpx" disabled class="w-full bg-amber-600 hover:bg-amber-700 disabled:bg-slate-300 text-white text-xs font-bold py-2 px-3 rounded-lg shadow transition flex items-center justify-center space-x-1.5">
+                        <button id="btn-qrcode-scan" disabled onclick="openQrScannerModal()" class="w-full bg-purple-600 hover:bg-purple-700 disabled:bg-slate-300 disabled:text-slate-500 text-white text-xs font-bold py-2 px-2 rounded-lg shadow transition flex items-center justify-center space-x-1 truncate">
+                            <i class="fa-solid fa-qrcode"></i>
+                            <span class="truncate">QR Code</span>
+                        </button>
+
+                        <button id="btn-export-gpx" disabled class="w-full bg-amber-600 hover:bg-amber-700 disabled:bg-slate-300 disabled:text-slate-500 text-white text-xs font-bold py-2 px-2 rounded-lg shadow transition flex items-center justify-center space-x-1 truncate">
                             <i class="fa-solid fa-map-location-dot"></i>
-                            <span>Exportar GPX (OsmAnd)</span>
+                            <span class="truncate">Exportar GPX</span>
                         </button>
 
-                        <button id="btn-export" disabled class="w-full bg-emerald-600 hover:bg-emerald-700 disabled:bg-slate-300 text-white text-xs font-bold py-2 px-3 rounded-lg shadow transition flex items-center justify-center space-x-1.5">
+                        <button id="btn-export" disabled class="w-full bg-emerald-600 hover:bg-emerald-700 disabled:bg-slate-300 disabled:text-slate-500 text-white text-xs font-bold py-2 px-2 rounded-lg shadow transition flex items-center justify-center space-x-1 truncate">
                             <i class="fa-solid fa-download"></i>
-                            <span>Exportar Relatório Excel</span>
+                            <span class="truncate">Exportar Excel</span>
                         </button>
                     </div>
                 </div>
@@ -197,11 +205,10 @@
         <main id="map-panel" class="flex-1 w-full h-full relative hidden md:block">
             <div id="map"></div>
 
-            <!-- Painel Superior de Orientação do Modo Navegação (Card Preto Otimizado) -->
+            <!-- Painel Superior de Orientação do Modo Navegação -->
             <div id="nav-header-panel" class="hidden absolute top-3 left-3 right-3 sm:right-4 z-30 bg-slate-900/95 text-white p-3 rounded-2xl shadow-2xl border border-slate-700 backdrop-blur-md">
                 <div class="flex items-center justify-between">
                     <div class="flex-1 min-w-0 mr-2">
-                        <!-- Linha Superior: Bolinha Amarela + Cód/SPX -->
                         <div class="flex items-center space-x-2 min-w-0 mb-1">
                             <div class="w-7 h-7 rounded-full bg-amber-400 text-slate-950 font-extrabold text-xs flex items-center justify-center shrink-0 shadow">
                                 <span id="nav-next-num">#</span>
@@ -213,18 +220,15 @@
                             </div>
                         </div>
 
-                        <!-- Linha Inferior: Endereço com (N) pacotes antes do logradouro -->
                         <p id="nav-next-address" class="text-base sm:text-lg text-slate-100 font-bold break-words leading-tight mt-0.5">Aguardando rota...</p>
                     </div>
 
                     <!-- Botões de Ação para Entregas de Pacotes -->
                     <div id="nav-delivery-actions" class="flex flex-col items-center shrink-0 ml-1 space-y-1">
-                        <!-- Botão Pular no topo -->
                         <button onclick="skipCurrentDelivery()" title="Pular Entrega (Voltar depois)" class="w-full h-7 bg-amber-500 hover:bg-amber-400 text-slate-950 rounded-lg flex items-center justify-center text-xs shadow font-bold">
                             <i class="fa-solid fa-forward-step"></i>
                         </button>
 
-                        <!-- Botões Sucesso e Ocorrência lado a lado -->
                         <div class="flex items-center space-x-1">
                             <button onclick="setDeliveryStatus(currentNavIndex, 'success')" title="Concluir Entrega" class="w-8 h-8 bg-emerald-600 hover:bg-emerald-500 text-white rounded-xl flex items-center justify-center text-xs shadow font-bold">
                                 <i class="fa-solid fa-check"></i>
@@ -234,7 +238,6 @@
                             </button>
                         </div>
 
-                        <!-- Texto do próximo número de casa na mesma rua -->
                         <span id="nav-next-house-num" class="hidden text-[10px] font-bold text-amber-300 tracking-tight whitespace-nowrap leading-none mt-0.5"></span>
                     </div>
 
@@ -304,6 +307,41 @@
         </main>
     </div>
 
+    <!-- Modal do Leitor de QR Code -->
+    <div id="qr-modal" class="hidden fixed inset-0 bg-slate-950/85 backdrop-blur-md z-[2000] flex flex-col items-center justify-center p-4">
+        <div class="bg-slate-900 border border-slate-700 rounded-2xl w-full max-w-md overflow-hidden shadow-2xl flex flex-col relative">
+            <!-- Header do Modal -->
+            <div class="bg-slate-800 px-4 py-3 border-b border-slate-700 flex items-center justify-between">
+                <div class="flex items-center space-x-2 text-purple-400 font-bold text-sm">
+                    <i class="fa-solid fa-qrcode text-base"></i>
+                    <span>Escanear QR Code do Pacote</span>
+                </div>
+                <button onclick="closeQrScannerModal()" class="text-slate-400 hover:text-white font-bold text-lg px-2 active:scale-95 transition">✕</button>
+            </div>
+
+            <!-- Área de Vídeo / Leitor HTML5 -->
+            <div class="p-4 flex flex-col items-center justify-center relative bg-black min-h-[320px]">
+                <div id="qr-reader" class="w-full rounded-xl overflow-hidden border border-slate-800"></div>
+                <p class="text-slate-400 text-xs mt-3 text-center">Aproxime a câmera da etiqueta com QR Code do pacote</p>
+
+                <!-- Overlay de Resultado Grande (Mostrado por 2 segundos após leitura) -->
+                <div id="qr-result-overlay" class="hidden absolute inset-0 bg-amber-400 text-slate-950 flex flex-col items-center justify-center p-4 z-10 text-center transition-all duration-300">
+                    <span class="text-xs font-black uppercase tracking-widest bg-slate-950 text-amber-400 px-3 py-1 rounded-full mb-2">Número na Rota</span>
+                    <h2 id="qr-result-number" class="text-8xl sm:text-9xl font-black leading-none drop-shadow-md">#--</h2>
+                    <p id="qr-result-code" class="text-sm font-extrabold mt-3 truncate max-w-full text-slate-900 bg-amber-300 px-2 py-0.5 rounded-md"></p>
+                    <p id="qr-result-address" class="text-xs font-bold text-slate-800 truncate max-w-full mt-1.5"></p>
+                </div>
+
+                <!-- Overlay de Erro (Não encontrado) -->
+                <div id="qr-error-overlay" class="hidden absolute inset-0 bg-rose-600 text-white flex flex-col items-center justify-center p-4 z-10 text-center transition-all duration-300">
+                    <i class="fa-solid fa-triangle-exclamation text-5xl mb-2"></i>
+                    <h3 class="text-xl font-bold">Pacote Não Encontrado</h3>
+                    <p id="qr-error-code" class="text-xs font-medium text-rose-100 mt-1 max-w-full truncate px-2"></p>
+                </div>
+            </div>
+        </div>
+    </div>
+
     <!-- Mobile Navigation Bar (Bottom) -->
     <nav class="md:hidden bg-slate-900 border-t border-slate-800 flex justify-around p-1.5 shrink-0 z-30">
         <button id="nav-btn-list" onclick="switchMobileTab('list')" class="flex-1 py-1.5 px-3 text-center text-indigo-400 font-bold text-xs flex flex-col items-center space-y-1 bg-slate-800/80 rounded-lg">
@@ -347,6 +385,10 @@
         let gpsWatchId = null;
         let driverMarker = null;
         let searchMarker = null;
+
+        // QR Code Scanner Vars
+        let html5QrCode = null;
+        let isQrCooldown = false;
 
         /* Verificar Status da Conexão com a Internet */
         function checkInternetConnection() {
@@ -446,6 +488,122 @@
                 menuBox.classList.add('hidden');
                 if (chevron) chevron.className = "fa-solid fa-chevron-down text-[10px] ml-0.5";
             }
+        }
+
+        /* --- SISTEMA DE LEITURA E IDENTIFICAÇÃO DE QR CODE --- */
+        function openQrScannerModal() {
+            if (!activePoints || activePoints.length === 0) {
+                alert("Otimize a rota primeiro antes de utilizar a câmera de identificação dos pacotes.");
+                return;
+            }
+
+            const modal = document.getElementById('qr-modal');
+            modal.classList.remove('hidden');
+
+            if (!html5QrCode) {
+                html5QrCode = new Html5Qrcode("qr-reader");
+            }
+
+            const config = { fps: 10, qrbox: { width: 230, height: 230 } };
+
+            html5QrCode.start(
+                { facingMode: "environment" },
+                config,
+                onQrCodeScanned,
+                onQrScanError
+            ).catch(err => {
+                console.error("Erro ao iniciar câmera:", err);
+                alert("Não foi possível acessar a câmera do dispositivo. Verifique as permissões do navegador.");
+                closeQrScannerModal();
+            });
+        }
+
+        function closeQrScannerModal() {
+            const modal = document.getElementById('qr-modal');
+            modal.classList.add('hidden');
+
+            if (html5QrCode && html5QrCode.isScanning) {
+                html5QrCode.stop().then(() => {
+                    html5QrCode.clear();
+                }).catch(err => console.error("Erro ao parar leitor:", err));
+            }
+
+            document.getElementById('qr-result-overlay').classList.add('hidden');
+            document.getElementById('qr-error-overlay').classList.add('hidden');
+            isQrCooldown = false;
+        }
+
+        function playBeepSound(isSuccess = true) {
+            try {
+                const AudioContext = window.AudioContext || window.webkitAudioContext;
+                if (!AudioContext) return;
+                const ctx = new AudioContext();
+                const osc = ctx.createOscillator();
+                const gain = ctx.createGain();
+
+                osc.type = isSuccess ? 'sine' : 'sawtooth';
+                osc.frequency.setValueAtTime(isSuccess ? 880 : 280, ctx.currentTime);
+                gain.gain.setValueAtTime(0.3, ctx.currentTime);
+
+                osc.connect(gain);
+                gain.connect(ctx.destination);
+
+                osc.start();
+                osc.stop(ctx.currentTime + (isSuccess ? 0.18 : 0.35));
+            } catch (e) {}
+        }
+
+        function onQrCodeScanned(decodedText) {
+            if (isQrCooldown) return;
+            isQrCooldown = true;
+
+            const scannedRaw = decodedText.trim();
+            const scannedUpper = scannedRaw.toUpperCase();
+
+            let matchedIdx = -1;
+            let matchedPoint = null;
+
+            activePoints.forEach((p, idx) => {
+                const spxCode = p.spx ? p.spx.trim().toUpperCase() : '';
+                if (spxCode && (scannedUpper === spxCode || scannedUpper.includes(spxCode) || spxCode.includes(scannedUpper))) {
+                    matchedIdx = idx;
+                    matchedPoint = p;
+                }
+            });
+
+            if (matchedPoint && matchedIdx !== -1) {
+                const seqNumber = matchedIdx + 1;
+                playBeepSound(true);
+
+                const overlay = document.getElementById('qr-result-overlay');
+                document.getElementById('qr-result-number').textContent = `#${seqNumber}`;
+                document.getElementById('qr-result-code').textContent = matchedPoint.spx;
+                document.getElementById('qr-result-address').textContent = `${matchedPoint.address} (${matchedPoint.bairro})`;
+
+                overlay.classList.remove('hidden');
+
+                // Permanece visível por 2 segundos e libera a câmera para o próximo pacote
+                setTimeout(() => {
+                    overlay.classList.add('hidden');
+                    isQrCooldown = false;
+                }, 2000);
+            } else {
+                playBeepSound(false);
+
+                const errOverlay = document.getElementById('qr-error-overlay');
+                document.getElementById('qr-error-code').textContent = `Lido: "${scannedRaw}"`;
+
+                errOverlay.classList.remove('hidden');
+
+                setTimeout(() => {
+                    errOverlay.classList.add('hidden');
+                    isQrCooldown = false;
+                }, 2000);
+            }
+        }
+
+        function onQrScanError(errorMessage) {
+            // Ignorado (buscando quadros de vídeo)
         }
 
         /* Extrai o número da casa a partir da string do endereço */
@@ -1199,11 +1357,9 @@
             document.getElementById('nav-next-num').textContent = `${nextIdx + 1}`;
             document.getElementById('nav-next-title').textContent = `${targetPoint.spx}${sameAddressPoints.length > 1 ? ` (+${sameAddressPoints.length - 1} nessa rua)` : ''}`;
             
-            /* Adiciona o prefixo (N) antes do endereço se houver mais de 1 pacote no local */
             const pkgCountPrefix = sameAddressPoints.length > 1 ? `(${sameAddressPoints.length}) ` : '';
             document.getElementById('nav-next-address').textContent = `${pkgCountPrefix}${targetPoint.address} - ${targetPoint.bairro}`;
 
-            /* Lógica para verificar a próxima entrega e exibir "Próx. n.:" se for na mesma rua */
             let nextPendingPoint = null;
             for (let i = nextIdx + 1; i < activePoints.length; i++) {
                 if (activePoints[i].status === 'pending') {
@@ -1277,7 +1433,7 @@
             }
         }
 
-        /* Normalização aprimorada do logradouro para agrupar endereços similares/typos */
+        /* Normalização aprimorada do logradouro para agrupar endereços similares */
         function normalizeStreetName(address) {
             if (!address || typeof address !== 'string') return '';
             let part = address.split(',')[0].split('-')[0];
@@ -1556,6 +1712,11 @@
                 document.getElementById('btn-export-gpx').disabled = false;
                 document.getElementById('btn-export').disabled = false;
 
+                // Se houver geometria calculada, ativa o botão de leitura de QR Code
+                if (currentRouteGeometry && activePoints.length > 0) {
+                    document.getElementById('btn-qrcode-scan').disabled = false;
+                }
+
                 renderMapAndUI(activePoints, false);
                 updateFileSummaryUI(rawData);
 
@@ -1611,6 +1772,7 @@
             updateRouteOnMap();
             document.getElementById('dist-badge').classList.add('hidden');
             document.getElementById('file-summary-card').classList.add('hidden');
+            document.getElementById('btn-qrcode-scan').disabled = true;
 
             showLoading("Lendo todas as abas da planilha...");
             const reader = new FileReader();
@@ -1699,6 +1861,7 @@
             document.getElementById('btn-optimize').disabled = false;
             document.getElementById('btn-export-gpx').disabled = false;
             document.getElementById('btn-export').disabled = false;
+            document.getElementById('btn-qrcode-scan').disabled = true;
 
             activePoints = [...rawData];
             renderMapAndUI(activePoints, false);
@@ -1716,7 +1879,6 @@
             return R * 2 * Math.atan2(Math.sqrt(a), Math.sqrt(1-a));
         }
 
-        /* Algoritmo TSP Otimizado Funcional (Fatiamento de Array Corrigido) */
         function solveDeliveriesTSP(deliveries, manualFirstIdx, prioritizeSameStreet) {
             let unvisited = [...deliveries];
             let route = [];
@@ -1839,6 +2001,9 @@
 
                 activePoints = solveDeliveriesTSP(rawData, firstIdx, prioritizeSameStreet);
                 await renderMapAndUI(activePoints, true);
+
+                // Ativa o botão de escaneamento de QR Code após otimização
+                document.getElementById('btn-qrcode-scan').disabled = false;
             } catch (err) {
                 console.error("Erro na otimização:", err);
                 alert("Erro ao otimizar a rota: " + err.message);
