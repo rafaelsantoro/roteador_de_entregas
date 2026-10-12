@@ -47,7 +47,7 @@
             </div>
         </div>
 
-        <!-- Dynamic Counters -->
+        <!-- Dynamic Counters & Fullscreen Button -->
         <div id="status-counters" class="flex items-center space-x-1.5 text-xs mt-1 sm:mt-0">
             <span class="bg-slate-800 text-slate-300 px-2.5 py-1 rounded-md border border-slate-700 font-semibold text-xs" title="Total">
                 <i class="fa-solid fa-boxes-packing text-indigo-400 mr-1"></i><span id="cnt-total">0</span>
@@ -58,6 +58,9 @@
             <span class="bg-rose-950 text-rose-300 px-2.5 py-1 rounded-md border border-rose-800 font-semibold text-xs" title="Ocorrência">
                 <i class="fa-solid fa-circle-xmark text-rose-400 mr-1"></i><span id="cnt-occurrence">0</span>
             </span>
+            <button onclick="toggleFullscreen()" title="Alternar Tela Cheia" class="bg-slate-800 hover:bg-slate-700 text-slate-300 px-2 py-1 rounded-md border border-slate-700 font-semibold text-xs transition flex items-center justify-center">
+                <i class="fa-solid fa-expand" id="fullscreen-icon"></i>
+            </button>
         </div>
     </header>
 
@@ -86,8 +89,8 @@
                         <i class="fa-solid fa-chevron-down text-[10px] ml-0.5" id="menu-chevron"></i>
                     </button>
 
-                    <!-- Botão de Navegação ao lado do Menu -->
-                    <button id="btn-nav-mode-top" onclick="toggleNavigationMode()" disabled class="flex-1 bg-amber-500 hover:bg-amber-600 disabled:bg-slate-300 disabled:text-slate-500 text-slate-950 text-xs font-bold py-2 px-2.5 rounded-lg shadow transition flex items-center justify-center space-x-1.5 truncate">
+                    <!-- Botão de Navegação ao lado do Menu (Disponível sem carregar planilha) -->
+                    <button id="btn-nav-mode-top" onclick="toggleNavigationMode()" class="flex-1 bg-amber-500 hover:bg-amber-600 text-slate-950 text-xs font-bold py-2 px-2.5 rounded-lg shadow transition flex items-center justify-center space-x-1.5 truncate">
                         <i class="fa-solid fa-compass"></i>
                         <span id="nav-mode-top-text">Navegação</span>
                     </button>
@@ -203,7 +206,7 @@
                     <button onclick="executeAddressSearch()" class="bg-amber-400 hover:bg-amber-500 text-slate-950 font-bold text-xs px-3 py-2 rounded-xl transition">
                         <i class="fa-solid fa-search"></i>
                     </button>
-                    <button onclick="toggleSearchBox()" class="text-slate-400 hover:text-white text-xs px-1 font-bold">✕</button>
+                    <button onclick="toggleSearchBox(false)" class="text-slate-400 hover:text-white text-xs px-1 font-bold">✕</button>
                 </div>
                 <div id="search-results-list" class="max-h-40 overflow-y-auto space-y-1 text-xs custom-scroll"></div>
             </div>
@@ -265,7 +268,7 @@
     </nav>
 
     <script>
-        const ORS_API_KEY = 'eyJvcmciOiI1YjNjZTM1OTc4NTExMTAwMDFjZjYyNDgiLCJpZCI6ImIwNzE4MDA5ZDMzMTRhM2RiZjNjY2EyYTQ2ZDFhZWM2IiwiaCI6Im11cm11cjY0In0=';
+        const ORS_API_KEY = 'eyJvcmciOiI1YjNjZTM1OTc4NTExMTAwMDFjZjYyNDgiLCJpZCI6ImIwNzE4MDA5ZDMzMTRhM3RiZjNjY2EyYTQ2ZDFhZWM2IiwiaCI6Im11cm11cjY0In0=';
         const STORAGE_KEY = 'delivery_router_saved_state';
         const LIGHT_THEME_URL = 'https://basemaps.cartocdn.com/gl/voyager-gl-style/style.json';
 
@@ -280,7 +283,7 @@
         let currentRouteGeometry = null;
         let currentRouteDistanceKm = '0';
 
-        // Modo Navegação & Bússola & 3D
+        // Modo Navegação & Bússola & 3D & Controle de Recálculo
         let isNavMode = false;
         let is3DMode = false;
         let isCustomSearchNav = false;
@@ -288,6 +291,8 @@
         let smoothedHeading = 0;
         let lastGpsCoords = null;
         let deviceAlphaHeading = null;
+        let lastRecalcTime = 0;
+        let wakeLock = null;
 
         // GPS & Pesquisa
         let gpsWatchId = null;
@@ -311,7 +316,7 @@
             map.addControl(new maplibregl.NavigationControl({ showCompass: false }), 'bottom-right');
 
 			map.on('style.load', () => {
-				isTextBoosted = false; // Permite aplicar a ampliação no novo estilo carregado
+				isTextBoosted = false;
 				try {
 					boostMapTextLabels();
 				} catch(e) {}
@@ -324,6 +329,52 @@
 
             setupEvents();
             setupDeviceOrientation();
+            requestWakeLock();
+        });
+
+        /* --- MANTER A TELA LIGADA (Wake Lock API) --- */
+        async function requestWakeLock() {
+            if ('wakeLock' in navigator) {
+                try {
+                    wakeLock = await navigator.wakeLock.request('screen');
+                    wakeLock.addEventListener('release', () => {
+                        wakeLock = null;
+                    });
+                } catch (err) {
+                    console.log('Wake Lock não pôde ser ativado:', err);
+                }
+            }
+        }
+
+        document.addEventListener('visibilitychange', async () => {
+            if (document.visibilityState === 'visible') {
+                await requestWakeLock();
+            }
+        });
+
+        /* --- MODO TELA CHEIA (Fullscreen API) --- */
+        function toggleFullscreen() {
+            const icon = document.getElementById('fullscreen-icon');
+            if (!document.fullscreenElement) {
+                document.documentElement.requestFullscreen().then(() => {
+                    if (icon) icon.className = "fa-solid fa-compress";
+                }).catch(err => {
+                    console.log("Erro ao entrar em Tela Cheia:", err);
+                });
+            } else {
+                if (document.exitFullscreen) {
+                    document.exitFullscreen().then(() => {
+                        if (icon) icon.className = "fa-solid fa-expand";
+                    });
+                }
+            }
+        }
+
+        document.addEventListener('fullscreenchange', () => {
+            const icon = document.getElementById('fullscreen-icon');
+            if (icon) {
+                icon.className = document.fullscreenElement ? "fa-solid fa-compress" : "fa-solid fa-expand";
+            }
         });
 
         function toggleMenuConfig() {
@@ -339,9 +390,15 @@
         }
 
         /* Pesquisa de Endereço via OpenStreetMap Nominatim */
-        function toggleSearchBox() {
+        function toggleSearchBox(forceOpen) {
             const box = document.getElementById('search-box-panel');
-            box.classList.toggle('hidden');
+            if (forceOpen === true) {
+                box.classList.remove('hidden');
+            } else if (forceOpen === false) {
+                box.classList.add('hidden');
+            } else {
+                box.classList.toggle('hidden');
+            }
             if (!box.classList.contains('hidden')) {
                 document.getElementById('search-address-input').focus();
             }
@@ -377,7 +434,7 @@
         }
 
         function selectSearchResult(lat, lng, name) {
-            toggleSearchBox();
+            toggleSearchBox(false);
             if (searchMarker) searchMarker.remove();
 
             const el = document.createElement('div');
@@ -424,6 +481,7 @@
 
             if (!isNavMode) {
                 isNavMode = true;
+                requestWakeLock();
                 const btnMap = document.getElementById('btn-gps-nav-mode');
                 const navHeader = document.getElementById('nav-header-panel');
                 const distBadge = document.getElementById('dist-badge');
@@ -620,9 +678,8 @@
         }
 
 	function setupDeviceOrientation() {
-		// Bússola simplificada para evitar alertas de APIs obsoletas no navegador
 		if (window.DeviceOrientationEvent && typeof DeviceOrientationEvent.requestPermission === 'function') {
-			// Apenas ativa se o dispositivo exigir permissão explícita
+			// Suporte a permissão de orientação
 		}
 	}
 
@@ -644,23 +701,18 @@
 						return;
 					}
 
-					// 1. Se for um Objeto legado do Mapbox/Carto com "stops" (ex: { stops: [[10, 8], [14, 12]] })
 					if (typeof currentSize === 'object' && !Array.isArray(currentSize) && currentSize.stops) {
 						const newStops = currentSize.stops.map(st => [st[0], Number((st[1] * scaleFactor).toFixed(2))]);
 						map.setLayoutProperty(layer.id, 'text-size', { ...currentSize, stops: newStops });
 					} 
-					// 2. Se for um Número simples
 					else if (typeof currentSize === 'number') {
 						map.setLayoutProperty(layer.id, 'text-size', Number((currentSize * scaleFactor).toFixed(2)));
 					} 
-					// 3. Se for uma Expressão no formato de Array (ex: ["interpolate", ...])
 					else if (Array.isArray(currentSize)) {
-						if (currentSize[0] === '*' && currentSize[1] === scaleFactor) return; // Evita duplicação
+						if (currentSize[0] === '*' && currentSize[1] === scaleFactor) return;
 						map.setLayoutProperty(layer.id, 'text-size', ['*', scaleFactor, currentSize]);
 					}
-				} catch (e) {
-					// Ignores camadas que não aceitam alteração dinâmica de tamanho
-				}
+				} catch (e) {}
 			}
 		});
 
@@ -689,6 +741,7 @@
                 }
 
                 showLoading("Conectando ao GPS...");
+                requestWakeLock();
 
                 gpsWatchId = navigator.geolocation.watchPosition(
                     onGpsSuccess,
@@ -769,15 +822,13 @@
                 driverMarker.setLngLat([lng, lat]);
             }
 
-            /* No modo de navegação, como o mapa se rotaciona na direção de movimento,
-               a seta permanece sempre virada para a frente (0° relativo à tela). */
             const arrowIcon = document.getElementById('driver-arrow-icon');
             if (arrowIcon) {
                 const arrowRotation = isNavMode ? 0 : smoothedHeading;
                 arrowIcon.style.transform = `rotate(${arrowRotation}deg)`;
             }
 
-            /* Remoção gradual da linha de rota atrás do veículo em tempo real */
+            /* RECÁLCULO AUTOMÁTICO SE SAIR DA ROTA + REMOÇÃO GRADUAL DA LINHA ATRÁS DO VEÍCULO */
             if (isNavMode && currentRouteGeometry && currentRouteGeometry.coordinates && currentRouteGeometry.coordinates.length > 1) {
                 const coords = currentRouteGeometry.coordinates;
                 let closestIdx = 0;
@@ -791,21 +842,34 @@
                     }
                 }
 
-                const remainingCoords = [[lng, lat], ...coords.slice(closestIdx + 1)];
-                if (remainingCoords.length >= 2) {
-                    currentRouteGeometry.coordinates = remainingCoords;
-                    if (map && map.getSource('route-source')) {
-                        map.getSource('route-source').setData({
-                            'type': 'Feature',
-                            'properties': {},
-                            'geometry': currentRouteGeometry
-                        });
+                // Se a distância até a linha da rota for maior que 45 metros, recalcula a rota da posição atual
+                const now = Date.now();
+                if (minD * 1000 > 45 && (now - lastRecalcTime > 6000)) {
+                    lastRecalcTime = now;
+                    if (isCustomSearchNav && searchMarker) {
+                        const targetLngLat = searchMarker.getLngLat();
+                        const addressText = document.getElementById('nav-next-address').textContent;
+                        navigateToSearchLocation(targetLngLat.lat, targetLngLat.lng, addressText);
+                    } else if (currentNavIndex >= 0 && activePoints && activePoints[currentNavIndex]) {
+                        updateNavSegmentRoute(currentNavIndex);
+                    }
+                } else {
+                    const remainingCoords = [[lng, lat], ...coords.slice(closestIdx + 1)];
+                    if (remainingCoords.length >= 2) {
+                        currentRouteGeometry.coordinates = remainingCoords;
+                        if (map && map.getSource('route-source')) {
+                            map.getSource('route-source').setData({
+                                'type': 'Feature',
+                                'properties': {},
+                                'geometry': currentRouteGeometry
+                            });
+                        }
                     }
                 }
             }
 
             if (isNavMode && map) {
-                if (isFirstGps && currentNavIndex >= 0 && !isCustomSearchNav) {
+                if (isFirstGps && currentNavIndex >= 0 && !isCustomSearchNav && activePoints && activePoints.length > 0) {
                     updateNavSegmentRoute(currentNavIndex);
                 }
 
@@ -853,12 +917,8 @@
             }
         }
 
+        /* PERMITE ATIVAR MODO NAVEGAÇÃO MESMO SEM PLANILHA ABERTA */
         function toggleNavigationMode(forceIdx = null) {
-            if (!activePoints || activePoints.length === 0) {
-                alert("Carregue e otimize a planilha antes de iniciar a navegação.");
-                return;
-            }
-
             isNavMode = !isNavMode;
 
             const btnMap = document.getElementById('btn-gps-nav-mode');
@@ -866,11 +926,16 @@
             const distBadge = document.getElementById('dist-badge');
             const topNavBtnText = document.getElementById('nav-mode-top-text');
 
-            let validIdx = (typeof forceIdx === 'number' && forceIdx >= 0 && forceIdx < activePoints.length) ? forceIdx : null;
+            let validIdx = (activePoints && typeof forceIdx === 'number' && forceIdx >= 0 && forceIdx < activePoints.length) ? forceIdx : null;
 
             if (isNavMode) {
+                requestWakeLock();
                 btnMap.className = "absolute bottom-48 right-3 z-20 w-11 h-11 bg-amber-400 text-slate-950 backdrop-blur-md rounded-full shadow-2xl border-2 border-white flex items-center justify-center text-lg active:scale-95 transition ring-4 ring-amber-400/30";
-                navHeader.classList.remove('hidden');
+                
+                if (activePoints && activePoints.length > 0) {
+                    navHeader.classList.remove('hidden');
+                }
+                
                 distBadge.classList.add('hidden');
                 if (topNavBtnText) topNavBtnText.textContent = "Sair da Navegação";
 
@@ -882,11 +947,18 @@
                     switchMobileTab('map');
                 }
 
-                updateNavSegmentRoute(validIdx);
+                if (activePoints && activePoints.length > 0) {
+                    updateNavSegmentRoute(validIdx);
+                } else {
+                    // Se não houver planilha carregada, abre diretamente a caixa de pesquisa de endereço
+                    toggleSearchBox(true);
+                }
             } else {
                 btnMap.className = "absolute bottom-48 right-3 z-20 w-11 h-11 bg-slate-900/90 hover:bg-slate-800 text-amber-400 backdrop-blur-md rounded-full shadow-2xl border border-slate-700 flex items-center justify-center text-lg active:scale-95 transition";
                 navHeader.classList.add('hidden');
-                distBadge.classList.remove('hidden');
+                if (activePoints && activePoints.length > 0) {
+                    distBadge.classList.remove('hidden');
+                }
                 if (topNavBtnText) topNavBtnText.textContent = "Navegação";
 
                 map.easeTo({
@@ -1161,7 +1233,6 @@
 
                 document.getElementById('start-point-select').disabled = false;
                 document.getElementById('btn-optimize').disabled = false;
-                document.getElementById('btn-nav-mode-top').disabled = false;
                 document.getElementById('btn-export-gpx').disabled = false;
                 document.getElementById('btn-export').disabled = false;
 
@@ -1304,7 +1375,6 @@
 
             document.getElementById('start-point-select').disabled = false;
             document.getElementById('btn-optimize').disabled = false;
-            document.getElementById('btn-nav-mode-top').disabled = false;
             document.getElementById('btn-export-gpx').disabled = false;
             document.getElementById('btn-export').disabled = false;
 
