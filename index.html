@@ -320,16 +320,16 @@
             </div>
 
             <!-- Área de Vídeo / Leitor HTML5 -->
-            <div class="p-4 flex flex-col items-center justify-center relative bg-black min-h-[320px]">
+            <div class="p-4 flex flex-col items-center justify-center relative bg-black min-h-[340px]">
                 <div id="qr-reader" class="w-full rounded-xl overflow-hidden border border-slate-800"></div>
                 <p class="text-slate-400 text-xs mt-3 text-center">Aproxime a câmera da etiqueta com QR Code do pacote</p>
 
-                <!-- Overlay de Resultado Grande (Mostrado por 2 segundos após leitura) -->
+                <!-- Overlay de Resultado Grande (Mostrado por 4.5 segundos após leitura com Fonte de Endereço Maior) -->
                 <div id="qr-result-overlay" class="hidden absolute inset-0 bg-amber-400 text-slate-950 flex flex-col items-center justify-center p-4 z-10 text-center transition-all duration-300">
-                    <span class="text-xs font-black uppercase tracking-widest bg-slate-950 text-amber-400 px-3 py-1 rounded-full mb-2">Número na Rota</span>
+                    <span class="text-xs font-black uppercase tracking-widest bg-slate-950 text-amber-400 px-3.5 py-1 rounded-full mb-2">Número na Rota</span>
                     <h2 id="qr-result-number" class="text-8xl sm:text-9xl font-black leading-none drop-shadow-md">#--</h2>
-                    <p id="qr-result-code" class="text-sm font-extrabold mt-3 truncate max-w-full text-slate-900 bg-amber-300 px-2 py-0.5 rounded-md"></p>
-                    <p id="qr-result-address" class="text-xs font-bold text-slate-800 truncate max-w-full mt-1.5"></p>
+                    <p id="qr-result-code" class="text-sm sm:text-base font-black mt-3 truncate max-w-full text-slate-900 bg-amber-300 px-3 py-1 rounded-md shadow-sm"></p>
+                    <p id="qr-result-address" class="text-sm sm:text-base font-extrabold text-slate-950 break-words max-w-full mt-2 leading-snug px-2"></p>
                 </div>
 
                 <!-- Overlay de Erro (Não encontrado) -->
@@ -389,6 +389,15 @@
         // QR Code Scanner Vars
         let html5QrCode = null;
         let isQrCooldown = false;
+
+        /* Abertura Automática em Tela Cheia no primeiro toque/clique */
+        function enableAutoFullscreen() {
+            if (!document.fullscreenElement) {
+                document.documentElement.requestFullscreen().catch(() => {});
+            }
+        }
+        document.addEventListener('click', enableAutoFullscreen, { once: true });
+        document.addEventListener('touchstart', enableAutoFullscreen, { once: true });
 
         /* Verificar Status da Conexão com a Internet */
         function checkInternetConnection() {
@@ -582,11 +591,11 @@
 
                 overlay.classList.remove('hidden');
 
-                // Permanece visível por 2 segundos e libera a câmera para o próximo pacote
+                // Tempo de exibição estendido para 4.5 segundos antes de liberar para o próximo pacote
                 setTimeout(() => {
                     overlay.classList.add('hidden');
                     isQrCooldown = false;
-                }, 2000);
+                }, 4500);
             } else {
                 playBeepSound(false);
 
@@ -598,12 +607,12 @@
                 setTimeout(() => {
                     errOverlay.classList.add('hidden');
                     isQrCooldown = false;
-                }, 2000);
+                }, 3000);
             }
         }
 
         function onQrScanError(errorMessage) {
-            // Ignorado (buscando quadros de vídeo)
+            // Silencioso enquanto lê quadros do vídeo
         }
 
         /* Extrai o número da casa a partir da string do endereço */
@@ -1712,7 +1721,6 @@
                 document.getElementById('btn-export-gpx').disabled = false;
                 document.getElementById('btn-export').disabled = false;
 
-                // Se houver geometria calculada, ativa o botão de leitura de QR Code
                 if (currentRouteGeometry && activePoints.length > 0) {
                     document.getElementById('btn-qrcode-scan').disabled = false;
                 }
@@ -2002,7 +2010,6 @@
                 activePoints = solveDeliveriesTSP(rawData, firstIdx, prioritizeSameStreet);
                 await renderMapAndUI(activePoints, true);
 
-                // Ativa o botão de escaneamento de QR Code após otimização
                 document.getElementById('btn-qrcode-scan').disabled = false;
             } catch (err) {
                 console.error("Erro na otimização:", err);
