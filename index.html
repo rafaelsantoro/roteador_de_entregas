@@ -197,11 +197,11 @@
         <main id="map-panel" class="flex-1 w-full h-full relative hidden md:block">
             <div id="map"></div>
 
-            <!-- Painel Superior de Orientação do Modo Navegação (Card Preto Otimizado) -->
+            <!-- Painel Superior de Orientação do Modo Navegação -->
             <div id="nav-header-panel" class="hidden absolute top-3 left-3 right-3 sm:right-4 z-30 bg-slate-900/95 text-white p-3 rounded-2xl shadow-2xl border border-slate-700 backdrop-blur-md">
                 <div class="flex items-center justify-between">
                     <div class="flex-1 min-w-0 mr-2">
-                        <!-- Linha Superior: Bolinha Amarela + Cód/SPX na mesma linha -->
+                        <!-- Linha Superior: Bolinha Amarela + Cód/SPX -->
                         <div class="flex items-center space-x-2 min-w-0 mb-1">
                             <div class="w-7 h-7 rounded-full bg-amber-400 text-slate-950 font-extrabold text-xs flex items-center justify-center shrink-0 shadow">
                                 <span id="nav-next-num">#</span>
@@ -213,7 +213,7 @@
                             </div>
                         </div>
 
-                        <!-- Linha Inferior: Endereço Expandido com Pré-Fixação do Nº de Pacotes (ex: (5) Rua A...) -->
+                        <!-- Linha Inferior: Endereço com (N) pacotes antes do logradouro -->
                         <p id="nav-next-address" class="text-base sm:text-lg text-slate-100 font-bold break-words leading-tight mt-0.5">Aguardando rota...</p>
                     </div>
 
@@ -317,7 +317,7 @@
     </nav>
 
     <script>
-        const ORS_API_KEY = 'eyJvcmciOiI1YjNjZTM1OTc4NTExMTAwMDFjZjYyNDgiLCJpZCI6ImIwNzE4MDA5ZDMzMTRhM3RiZjNjY2EyYTQ2ZDFhZWM2IiwiaCI6Im11cm11cjY0In0=';
+        const ORS_API_KEY = 'eyJvcmciOiI1YjNjZTM1OTc4NTExMTAwMDFjZjYyNDgiLCJpZCI6ImIwNzE4MDA5ZDMzMTRhM2RiZjNjY2EyYTQ2ZDFhZWM2IiwiaCI6Im11cm11cjY0In0=';
         const STORAGE_KEY = 'delivery_router_saved_state';
         const LIGHT_THEME_URL = 'https://basemaps.cartocdn.com/gl/voyager-gl-style/style.json';
 
@@ -1716,6 +1716,7 @@
             return R * 2 * Math.atan2(Math.sqrt(a), Math.sqrt(1-a));
         }
 
+        /* Algoritmo TSP Otimizado com Tratamento Correto de Slices e Matriz de Inversão */
         function solveDeliveriesTSP(deliveries, manualFirstIdx, prioritizeSameStreet) {
             let unvisited = [...deliveries];
             let route = [];
@@ -1760,6 +1761,7 @@
                 return d;
             }
 
+            /* Busca Local 2-Opt sem perda de ponteiros de array */
             let improved = true;
             let count = 0;
             let startI = (manualFirstIdx >= 0) ? 1 : 0;
@@ -1776,8 +1778,8 @@
                         let d2 = getPenaltyDist(prev, route[j]) + getPenaltyDist(route[i], next);
 
                         if (d2 < d1) {
-                            let segment = route.slice(i, j - i + 1).reverse();
-                            route.splice(i, j - i + 1, ...segment);
+                            let segment = route.slice(i, j + 1).reverse();
+                            route.splice(i, segment.length, ...segment);
                             improved = true;
                         }
                     }
@@ -1825,14 +1827,25 @@
         }
 
         async function optimizeAndDrawRoute() {
+            if (!rawData || rawData.length === 0) {
+                alert("Carregue uma planilha XLSX antes de otimizar a rota.");
+                return;
+            }
+
             showLoading("Otimizando e agrupando entregas por rua...");
             
-            const firstIdx = parseInt(document.getElementById('start-point-select').value);
-            const prioritizeSameStreet = document.getElementById('prioritize-same-street').checked;
+            try {
+                const firstIdx = parseInt(document.getElementById('start-point-select').value);
+                const prioritizeSameStreet = document.getElementById('prioritize-same-street').checked;
 
-            activePoints = solveDeliveriesTSP(rawData, firstIdx, prioritizeSameStreet);
-            await renderMapAndUI(activePoints, true);
-            hideLoading();
+                activePoints = solveDeliveriesTSP(rawData, firstIdx, prioritizeSameStreet);
+                await renderMapAndUI(activePoints, true);
+            } catch (err) {
+                console.error("Erro na otimização:", err);
+                alert("Erro ao otimizar a rota: " + err.message);
+            } finally {
+                hideLoading();
+            }
         }
 
         function getMarkerStyleConfig(number, status) {
