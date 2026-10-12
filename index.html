@@ -63,11 +63,20 @@
         </div>
     </header>
 
+    <!-- Banner de Alerta para Sem Internet -->
+    <div id="offline-warning" class="hidden bg-rose-600 text-white text-xs font-bold px-3 py-2 flex items-center justify-between shrink-0 z-30 shadow-lg">
+        <div class="flex items-center space-x-2">
+            <i class="fa-solid fa-wifi-slash text-base animate-pulse"></i>
+            <span>Atenção: Você está offline! Conecte-se à internet para calcular rotas e carregar os mapas.</span>
+        </div>
+        <button onclick="document.getElementById('offline-warning').classList.add('hidden')" class="text-white font-bold px-2">✕</button>
+    </div>
+
     <!-- Banner de Alerta para ficheiros locais file:// -->
     <div id="file-protocol-warning" class="hidden bg-amber-500 text-slate-950 text-xs font-bold px-3 py-2 flex items-center justify-between shrink-0 z-30">
         <div class="flex items-center space-x-2">
             <i class="fa-solid fa-triangle-exclamation text-base"></i>
-            <span>Atenção: Abrir o HTML direto da memória do dispositivo (file://) pode bloquear o GPS. Use um servidor local ou GitHub Pages.</span>
+            <span>Atenção: Abrir o HTML direto da memória do dispositivo (file://) pode bloquear o GPS. Use um servidor local se necessário.</span>
         </div>
         <button onclick="document.getElementById('file-protocol-warning').remove()" class="text-slate-900 font-bold px-2">✕</button>
     </div>
@@ -88,7 +97,7 @@
                         <i class="fa-solid fa-chevron-down text-[10px] ml-0.5" id="menu-chevron"></i>
                     </button>
 
-                    <!-- Botão de Navegação ao lado do Menu (Disponível sem carregar planilha) -->
+                    <!-- Botão de Navegação ao lado do Menu -->
                     <button id="btn-nav-mode-top" onclick="toggleNavigationMode()" class="flex-1 bg-amber-500 hover:bg-amber-600 text-slate-950 text-xs font-bold py-2 px-2.5 rounded-lg shadow transition flex items-center justify-center space-x-1.5 truncate">
                         <i class="fa-solid fa-compass"></i>
                         <span id="nav-mode-top-text">Navegação</span>
@@ -109,6 +118,33 @@
                         <div class="flex items-center justify-center space-x-2">
                             <i class="fa-solid fa-file-excel text-emerald-600 text-base"></i>
                             <span class="text-xs font-bold text-slate-700">Carregar Planilha XLSX</span>
+                        </div>
+                    </div>
+
+                    <!-- Card de Resumo da Planilha -->
+                    <div id="file-summary-card" class="hidden bg-slate-800 text-slate-100 rounded-lg p-2.5 border border-slate-700 text-xs shadow-sm space-y-1">
+                        <div class="flex items-center justify-between border-b border-slate-700/80 pb-1 mb-1">
+                            <span class="font-bold text-indigo-400 text-[11px] uppercase tracking-wider flex items-center gap-1.5">
+                                <i class="fa-solid fa-chart-pie"></i> Resumo da Planilha
+                            </span>
+                        </div>
+                        <div class="space-y-1 text-[11px]">
+                            <div class="flex justify-between items-center">
+                                <span class="text-slate-300">Nº de pacotes:</span>
+                                <strong id="sum-pkgs" class="text-amber-400 font-bold">0</strong>
+                            </div>
+                            <div class="flex justify-between items-center">
+                                <span class="text-slate-300">Número de endereços:</span>
+                                <strong id="sum-addrs" class="text-amber-400 font-bold">0</strong>
+                            </div>
+                            <div class="flex justify-between items-center">
+                                <span class="text-slate-300">Endereços c/ apenas 1 pacote:</span>
+                                <strong id="sum-single" class="text-amber-400 font-bold">0</strong>
+                            </div>
+                            <div class="flex justify-between items-center border-t border-slate-700/60 pt-1 mt-1">
+                                <span class="text-slate-200 font-bold">Nº de sacolas:</span>
+                                <strong id="sum-bags" class="text-emerald-400 font-extrabold text-xs">0</strong>
+                            </div>
                         </div>
                     </div>
 
@@ -161,34 +197,48 @@
         <main id="map-panel" class="flex-1 w-full h-full relative hidden md:block">
             <div id="map"></div>
 
-            <!-- Painel Superior de Orientação do Modo Navegação -->
-            <div id="nav-header-panel" class="hidden absolute top-3 left-3 right-16 z-30 bg-slate-900/95 text-white p-3 rounded-2xl shadow-2xl border border-slate-700 backdrop-blur-md">
+            <!-- Painel Superior de Orientação do Modo Navegação (Card Preto Otimizado) -->
+            <div id="nav-header-panel" class="hidden absolute top-3 left-3 right-3 sm:right-4 z-30 bg-slate-900/95 text-white p-3 rounded-2xl shadow-2xl border border-slate-700 backdrop-blur-md">
                 <div class="flex items-center justify-between">
-                    <div class="flex items-center space-x-2.5 min-w-0">
-                        <div class="w-8 h-8 rounded-full bg-amber-400 text-slate-950 font-extrabold text-xs flex items-center justify-center shrink-0 shadow">
-                            <span id="nav-next-num">#</span>
+                    <div class="flex-1 min-w-0 mr-2">
+                        <!-- Linha Superior: Bolinha Amarela + Cód/SPX na mesma linha -->
+                        <div class="flex items-center space-x-2 min-w-0 mb-1">
+                            <div class="w-7 h-7 rounded-full bg-amber-400 text-slate-950 font-extrabold text-xs flex items-center justify-center shrink-0 shadow">
+                                <span id="nav-next-num">#</span>
+                            </div>
+                            <div class="min-w-0 flex items-center space-x-1.5 truncate">
+                                <span id="nav-next-label" class="text-[10px] uppercase font-bold text-amber-400 tracking-wider shrink-0">Próximo Destino</span>
+                                <span class="text-slate-500 text-xs shrink-0">•</span>
+                                <h3 id="nav-next-title" class="text-xs sm:text-sm font-bold truncate text-amber-300">Carregando...</h3>
+                            </div>
                         </div>
-						<div class="min-w-0">
-						    <p id="nav-next-label" class="text-[10px] uppercase font-bold text-amber-400 tracking-wider">Próximo Destino</p>
-						    <h3 id="nav-next-title" class="text-sm font-bold break-words leading-tight text-amber-300">Carregando...</h3>
-						    <p id="nav-next-address" class="text-xs sm:text-sm text-slate-100 font-medium break-words leading-tight mt-0.5">Aguardando rota...</p>
-						</div>
+
+                        <!-- Linha Inferior: Endereço Expandido com Pré-Fixação do Nº de Pacotes (ex: (5) Rua A...) -->
+                        <p id="nav-next-address" class="text-base sm:text-lg text-slate-100 font-bold break-words leading-tight mt-0.5">Aguardando rota...</p>
                     </div>
 
-                    <!-- Botoes de Acao para Entregas de Pacotes -->
-                    <div id="nav-delivery-actions" class="flex items-center space-x-1 shrink-0 ml-2">
-                        <button onclick="skipCurrentDelivery()" title="Pular Entrega (Voltar depois)" class="w-8 h-8 bg-amber-500 hover:bg-amber-400 text-slate-950 rounded-xl flex items-center justify-center text-xs shadow font-bold">
+                    <!-- Botões de Ação para Entregas de Pacotes -->
+                    <div id="nav-delivery-actions" class="flex flex-col items-center shrink-0 ml-1 space-y-1">
+                        <!-- Botão Pular no topo -->
+                        <button onclick="skipCurrentDelivery()" title="Pular Entrega (Voltar depois)" class="w-full h-7 bg-amber-500 hover:bg-amber-400 text-slate-950 rounded-lg flex items-center justify-center text-xs shadow font-bold">
                             <i class="fa-solid fa-forward-step"></i>
                         </button>
-                        <button onclick="setDeliveryStatus(currentNavIndex, 'success')" title="Concluir Entrega" class="w-8 h-8 bg-emerald-600 hover:bg-emerald-500 text-white rounded-xl flex items-center justify-center text-xs shadow font-bold">
-                            <i class="fa-solid fa-check"></i>
-                        </button>
-                        <button onclick="setDeliveryStatus(currentNavIndex, 'occurrence')" title="Ocorrência" class="w-8 h-8 bg-rose-600 hover:bg-rose-500 text-white rounded-xl flex items-center justify-center text-xs shadow font-bold">
-                            <i class="fa-solid fa-xmark"></i>
-                        </button>
+
+                        <!-- Botões Sucesso e Ocorrência lado a lado -->
+                        <div class="flex items-center space-x-1">
+                            <button onclick="setDeliveryStatus(currentNavIndex, 'success')" title="Concluir Entrega" class="w-8 h-8 bg-emerald-600 hover:bg-emerald-500 text-white rounded-xl flex items-center justify-center text-xs shadow font-bold">
+                                <i class="fa-solid fa-check"></i>
+                            </button>
+                            <button onclick="setDeliveryStatus(currentNavIndex, 'occurrence')" title="Ocorrência" class="w-8 h-8 bg-rose-600 hover:bg-rose-500 text-white rounded-xl flex items-center justify-center text-xs shadow font-bold">
+                                <i class="fa-solid fa-xmark"></i>
+                            </button>
+                        </div>
+
+                        <!-- Texto do próximo número de casa na mesma rua -->
+                        <span id="nav-next-house-num" class="hidden text-[10px] font-bold text-amber-300 tracking-tight whitespace-nowrap leading-none mt-0.5"></span>
                     </div>
 
-                    <!-- Botao de Acao para Endereco Pesquisado Personalizado -->
+                    <!-- Botão de Ação para Endereço Pesquisado Personalizado -->
                     <div id="nav-custom-search-actions" class="hidden flex items-center shrink-0 ml-2">
                         <button onclick="cancelCustomSearchRoute()" class="bg-rose-600 hover:bg-rose-700 text-white text-xs font-bold py-1.5 px-2.5 rounded-xl shadow transition flex items-center space-x-1.5">
                             <i class="fa-solid fa-ban text-xs"></i>
@@ -267,8 +317,7 @@
     </nav>
 
     <script>
-        // CHAVE ORIGINAL RESTAURADA E CORRIGIDA DA VERSÃO FUNCIONAL (index_funcionava.txt)
-        const ORS_API_KEY = 'eyJvcmciOiI1YjNjZTM1OTc4NTExMTAwMDFjZjYyNDgiLCJpZCI6ImIwNzE4MDA5ZDMzMTRhM2RiZjNjY2EyYTQ2ZDFhZWM2IiwiaCI6Im11cm11cjY0In0=';
+        const ORS_API_KEY = 'eyJvcmciOiI1YjNjZTM1OTc4NTExMTAwMDFjZjYyNDgiLCJpZCI6ImIwNzE4MDA5ZDMzMTRhM3RiZjNjY2EyYTQ2ZDFhZWM2IiwiaCI6Im11cm11cjY0In0=';
         const STORAGE_KEY = 'delivery_router_saved_state';
         const LIGHT_THEME_URL = 'https://basemaps.cartocdn.com/gl/voyager-gl-style/style.json';
 
@@ -299,7 +348,23 @@
         let driverMarker = null;
         let searchMarker = null;
 
+        /* Verificar Status da Conexão com a Internet */
+        function checkInternetConnection() {
+            const offlineBanner = document.getElementById('offline-warning');
+            if (!offlineBanner) return;
+
+            if (!navigator.onLine) {
+                offlineBanner.classList.remove('hidden');
+            } else {
+                offlineBanner.classList.add('hidden');
+            }
+        }
+
         document.addEventListener('DOMContentLoaded', () => {
+            checkInternetConnection();
+            window.addEventListener('online', checkInternetConnection);
+            window.addEventListener('offline', checkInternetConnection);
+
             if (window.location.protocol === 'file:') {
                 const warnBox = document.getElementById('file-protocol-warning');
                 if (warnBox) warnBox.classList.remove('hidden');
@@ -337,12 +402,8 @@
             if ('wakeLock' in navigator) {
                 try {
                     wakeLock = await navigator.wakeLock.request('screen');
-                    wakeLock.addEventListener('release', () => {
-                        wakeLock = null;
-                    });
-                } catch (err) {
-                    console.log('Wake Lock não ativado:', err);
-                }
+                    wakeLock.addEventListener('release', () => { wakeLock = null; });
+                } catch (err) {}
             }
         }
 
@@ -358,9 +419,7 @@
             if (!document.fullscreenElement) {
                 document.documentElement.requestFullscreen().then(() => {
                     if (icon) icon.className = "fa-solid fa-compress";
-                }).catch(err => {
-                    console.log("Erro ao entrar em Tela Cheia:", err);
-                });
+                }).catch(() => {});
             } else {
                 if (document.exitFullscreen) {
                     document.exitFullscreen().then(() => {
@@ -387,6 +446,20 @@
                 menuBox.classList.add('hidden');
                 if (chevron) chevron.className = "fa-solid fa-chevron-down text-[10px] ml-0.5";
             }
+        }
+
+        /* Extrai o número da casa a partir da string do endereço */
+        function extractHouseNumber(address) {
+            if (!address || typeof address !== 'string') return '';
+            let parts = address.split(',');
+            if (parts.length > 1) {
+                let afterComma = parts[1].trim().split('-')[0].split('(')[0].trim();
+                let match = afterComma.match(/\d+[a-zA-Z]?/);
+                if (match) return match[0];
+            }
+            let matchNoComma = address.split('-')[0].match(/\b\d+[a-zA-Z]?\b/);
+            if (matchNoComma) return matchNoComma[0];
+            return '';
         }
 
         /* Pesquisa de Endereço via Nominatim */
@@ -478,6 +551,9 @@
             document.getElementById('nav-delivery-actions').classList.add('hidden');
             document.getElementById('nav-custom-search-actions').classList.remove('hidden');
 
+            const houseNumEl = document.getElementById('nav-next-house-num');
+            if (houseNumEl) houseNumEl.classList.add('hidden');
+
             if (!isNavMode) {
                 isNavMode = true;
                 requestWakeLock();
@@ -567,6 +643,9 @@
             document.getElementById('nav-custom-search-actions').classList.add('hidden');
             document.getElementById('nav-delivery-actions').classList.remove('hidden');
             document.getElementById('nav-next-label').textContent = 'Próximo Destino';
+
+            const houseNumEl = document.getElementById('nav-next-house-num');
+            if (houseNumEl) houseNumEl.classList.add('hidden');
         }
 
         function skipCurrentDelivery() {
@@ -671,8 +750,7 @@
         }
 
 	function setupDeviceOrientation() {
-		if (window.DeviceOrientationEvent && typeof DeviceOrientationEvent.requestPermission === 'function') {
-		}
+		if (window.DeviceOrientationEvent && typeof DeviceOrientationEvent.requestPermission === 'function') {}
 	}
 
 	let isTextBoosted = false;
@@ -962,7 +1040,6 @@
             }
         }
 
-        /* FUNÇÕES EXATAS DE ROTEAMENTO RESTAURADAS DA VERSÃO FUNCIONAL (index_funcionava.txt) */
         async function fetchDeliveryPolyline(orderedDeliveries) {
             if (orderedDeliveries.length < 2) return null;
             const allCoordinates = orderedDeliveries.map(p => [p.lng, p.lat]);
@@ -1120,8 +1197,37 @@
             const sameAddressPoints = activePoints.filter((p, i) => i >= nextIdx && p.status === 'pending' && p.streetKey === targetPoint.streetKey);
 
             document.getElementById('nav-next-num').textContent = `${nextIdx + 1}`;
-            document.getElementById('nav-next-title').textContent = `${targetPoint.spx}${sameAddressPoints.length > 1 ? ` (+${sameAddressPoints.length - 1} no local)` : ''}`;
-            document.getElementById('nav-next-address').textContent = `${targetPoint.address} - ${targetPoint.bairro}`;
+            document.getElementById('nav-next-title').textContent = `${targetPoint.spx}${sameAddressPoints.length > 1 ? ` (+${sameAddressPoints.length - 1} nessa rua)` : ''}`;
+            
+            /* Adiciona o prefixo (N) antes do endereço se houver mais de 1 pacote no local */
+            const pkgCountPrefix = sameAddressPoints.length > 1 ? `(${sameAddressPoints.length}) ` : '';
+            document.getElementById('nav-next-address').textContent = `${pkgCountPrefix}${targetPoint.address} - ${targetPoint.bairro}`;
+
+            /* Lógica para verificar a próxima entrega e exibir "Próx. n.:" se for na mesma rua */
+            let nextPendingPoint = null;
+            for (let i = nextIdx + 1; i < activePoints.length; i++) {
+                if (activePoints[i].status === 'pending') {
+                    nextPendingPoint = activePoints[i];
+                    break;
+                }
+            }
+
+            const houseNumEl = document.getElementById('nav-next-house-num');
+            if (houseNumEl) {
+                if (nextPendingPoint && nextPendingPoint.streetKey === targetPoint.streetKey) {
+                    const num = extractHouseNumber(nextPendingPoint.address);
+                    if (num) {
+                        houseNumEl.innerHTML = `Próx. n.: <span class="text-sm sm:text-base font-extrabold text-amber-200 ml-0.5">${num}</span>`;
+                        houseNumEl.classList.remove('hidden');
+                    } else {
+                        houseNumEl.classList.add('hidden');
+                        houseNumEl.textContent = '';
+                    }
+                } else {
+                    houseNumEl.classList.add('hidden');
+                    houseNumEl.textContent = '';
+                }
+            }
 
             const startCoord = lastGpsCoords 
                 ? [lastGpsCoords.lng, lastGpsCoords.lat] 
@@ -1171,14 +1277,110 @@
             }
         }
 
+        /* Normalização aprimorada do logradouro para agrupar endereços similares/typos */
         function normalizeStreetName(address) {
             if (!address || typeof address !== 'string') return '';
-            let part = address.split(',')[0];
+            let part = address.split(',')[0].split('-')[0];
             part = part.replace(/\d.*/, '');
             part = part.normalize('NFD').replace(/[\u0300-\u036f]/g, '');
             part = part.toLowerCase().trim();
-            part = part.replace(/^(rua|r\.|r|avenida|av\.|av|alameda|al\.|al|praca|prc\.|prc)\s+/, '');
-            return part.trim();
+            part = part.replace(/^(rua|r\.|r|avenida|av\.|av|alameda|al\.|al|praca|prc\.|prc|travessa|trv\.|trv|rodovia|rod\.|rod)\s+/, '');
+            part = part.replace(/[^a-z0-9\s]/g, '').replace(/\s+/g, ' ').trim();
+            return part;
+        }
+
+        /* Distância Levenshtein para agrupamento com tolerância a erros de digitação */
+        function levenshteinDistance(a, b) {
+            if (a.length === 0) return b.length;
+            if (b.length === 0) return a.length;
+            const matrix = [];
+            for (let i = 0; i <= b.length; i++) matrix[i] = [i];
+            for (let j = 0; j <= a.length; j++) matrix[0][j] = j;
+            for (let i = 1; i <= b.length; i++) {
+                for (let j = 1; j <= a.length; j++) {
+                    if (b.charAt(i - 1) === a.charAt(j - 1)) {
+                        matrix[i][j] = matrix[i - 1][j - 1];
+                    } else {
+                        matrix[i][j] = Math.min(
+                            matrix[i - 1][j - 1] + 1,
+                            matrix[i][j - 1] + 1,
+                            matrix[i - 1][j] + 1
+                        );
+                    }
+                }
+            }
+            return matrix[b.length][a.length];
+        }
+
+        /* Cálculo do Resumo dos dados da Planilha */
+        function calculateFileSummary(items) {
+            const totalPackages = items.length;
+            if (totalPackages === 0) {
+                return { totalPackages: 0, totalAddresses: 0, singlePackageAddresses: 0, totalBags: 0 };
+            }
+
+            const groups = [];
+
+            items.forEach(item => {
+                const key = normalizeStreetName(item.address);
+                if (!key) {
+                    groups.push({ key: 'desconhecido_' + Math.random(), count: 1 });
+                    return;
+                }
+
+                let foundGroup = groups.find(g => {
+                    if (g.key === key) return true;
+                    if (g.key.length >= 4 && key.length >= 4) {
+                        const dist = levenshteinDistance(g.key, key);
+                        const maxLen = Math.max(g.key.length, key.length);
+                        if (dist <= 2 && (1 - dist / maxLen) >= 0.80) {
+                            return true;
+                        }
+                    }
+                    return false;
+                });
+
+                if (foundGroup) {
+                    foundGroup.count++;
+                } else {
+                    groups.push({ key: key, count: 1 });
+                }
+            });
+
+            const totalAddresses = groups.length;
+            const singlePackageAddresses = groups.filter(g => g.count === 1).length;
+            const totalBags = totalAddresses - singlePackageAddresses;
+
+            return {
+                totalPackages,
+                totalAddresses,
+                singlePackageAddresses,
+                totalBags
+            };
+        }
+
+        function updateFileSummaryUI(items) {
+            const card = document.getElementById('file-summary-card');
+            if (!items || items.length === 0) {
+                if (card) card.classList.add('hidden');
+                return;
+            }
+
+            const summary = calculateFileSummary(items);
+
+            document.getElementById('sum-pkgs').textContent = summary.totalPackages;
+            document.getElementById('sum-addrs').textContent = summary.totalAddresses;
+            document.getElementById('sum-single').textContent = summary.singlePackageAddresses;
+            document.getElementById('sum-bags').textContent = summary.totalBags;
+
+            if (card) card.classList.remove('hidden');
+
+            const menuBox = document.getElementById('collapsible-menu');
+            const chevron = document.getElementById('menu-chevron');
+            if (menuBox && menuBox.classList.contains('hidden')) {
+                menuBox.classList.remove('hidden');
+                if (chevron) chevron.className = "fa-solid fa-chevron-up text-[10px] ml-0.5";
+            }
         }
 
         function ensureArrowIcon() {
@@ -1355,6 +1557,7 @@
                 document.getElementById('btn-export').disabled = false;
 
                 renderMapAndUI(activePoints, false);
+                updateFileSummaryUI(rawData);
 
                 if (activePoints.length > 0) {
                     updateRouteOnMap();
@@ -1407,6 +1610,7 @@
             currentRouteDistanceKm = '0';
             updateRouteOnMap();
             document.getElementById('dist-badge').classList.add('hidden');
+            document.getElementById('file-summary-card').classList.add('hidden');
 
             showLoading("Lendo todas as abas da planilha...");
             const reader = new FileReader();
@@ -1498,6 +1702,7 @@
 
             activePoints = [...rawData];
             renderMapAndUI(activePoints, false);
+            updateFileSummaryUI(rawData);
             saveStateToLocalStorage();
         }
 
@@ -1571,7 +1776,7 @@
                         let d2 = getPenaltyDist(prev, route[j]) + getPenaltyDist(route[i], next);
 
                         if (d2 < d1) {
-                            let segment = route.slice(i, j + 1).reverse();
+                            let segment = route.slice(i, j - i + 1).reverse();
                             route.splice(i, j - i + 1, ...segment);
                             improved = true;
                         }
