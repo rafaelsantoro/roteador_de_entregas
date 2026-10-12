@@ -5,7 +5,7 @@
     <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
     <title>Roteirizador & Controle de Entregas</title>
 
-	<!-- AGORA (Arquivos locais do seu próprio repositório) -->
+	<!-- Arquivos locais do seu repositório -->
 	<script src="lib/tailwindcss.js"></script>
 	<link href="lib/maplibre-gl.css" rel="stylesheet" />
 	<script src="lib/maplibre-gl.js"></script>
@@ -14,7 +14,6 @@
 	
 	<link rel="manifest" href="manifest.json">
 
-    
     <style>
         .custom-scroll::-webkit-scrollbar { width: 5px; }
         .custom-scroll::-webkit-scrollbar-thumb { background: #cbd5e1; border-radius: 4px; }
@@ -68,7 +67,7 @@
     <div id="file-protocol-warning" class="hidden bg-amber-500 text-slate-950 text-xs font-bold px-3 py-2 flex items-center justify-between shrink-0 z-30">
         <div class="flex items-center space-x-2">
             <i class="fa-solid fa-triangle-exclamation text-base"></i>
-            <span>Atenção: Abrir o HTML direto da memória do dispositivo (file://) pode bloquear o GPS. Use um servidor local se necessário.</span>
+            <span>Testando localmente em arquivo (file://). O app usará fallback automático de rotas. No GitHub Pages funcionará em modo principal.</span>
         </div>
         <button onclick="document.getElementById('file-protocol-warning').remove()" class="text-slate-900 font-bold px-2">✕</button>
     </div>
@@ -149,7 +148,7 @@
                 </div>
             </div>
 
-            <!-- List Container (Expandida) -->
+            <!-- List Container -->
             <div class="flex-1 overflow-y-auto custom-scroll p-3 space-y-2.5" id="stops-list-container">
                 <div class="text-center py-12 text-slate-400">
                     <i class="fa-solid fa-map-location-dot text-4xl mb-2 text-slate-300"></i>
@@ -211,7 +210,7 @@
                 <div id="search-results-list" class="max-h-40 overflow-y-auto space-y-1 text-xs custom-scroll"></div>
             </div>
 
-            <!-- Botão Flutuante de Pesquisa de Endereço (Acima do 3D) -->
+            <!-- Botão Flutuante de Pesquisa de Endereço -->
             <button id="btn-search-toggle" onclick="toggleSearchBox()" title="Pesquisar Endereço" class="absolute bottom-72 right-3 z-20 w-11 h-11 bg-slate-900/90 hover:bg-slate-800 text-slate-300 backdrop-blur-md rounded-full shadow-2xl border border-slate-700 flex items-center justify-center text-base active:scale-95 transition">
                 <i class="fa-solid fa-magnifying-glass"></i>
             </button>
@@ -332,7 +331,7 @@
             requestWakeLock();
         });
 
-        /* --- MANTER A TELA LIGADA (Wake Lock API) --- */
+        /* MANTER A TELA LIGADA (Wake Lock API) */
         async function requestWakeLock() {
             if ('wakeLock' in navigator) {
                 try {
@@ -341,7 +340,7 @@
                         wakeLock = null;
                     });
                 } catch (err) {
-                    console.log('Wake Lock não pôde ser ativado:', err);
+                    console.log('Wake Lock não ativado:', err);
                 }
             }
         }
@@ -352,7 +351,7 @@
             }
         });
 
-        /* --- MODO TELA CHEIA (Fullscreen API) --- */
+        /* MODO TELA CHEIA (Fullscreen API) */
         function toggleFullscreen() {
             const icon = document.getElementById('fullscreen-icon');
             if (!document.fullscreenElement) {
@@ -389,7 +388,7 @@
             }
         }
 
-        /* Pesquisa de Endereço via OpenStreetMap Nominatim */
+        /* Pesquisa de Endereço via Nominatim */
         function toggleSearchBox(forceOpen) {
             const box = document.getElementById('search-box-panel');
             if (forceOpen === true) {
@@ -475,7 +474,6 @@
 
             isCustomSearchNav = true;
 
-            // Esconde botoes de entrega e exibe botao de Cancelar Trajeto
             document.getElementById('nav-delivery-actions').classList.add('hidden');
             document.getElementById('nav-custom-search-actions').classList.remove('hidden');
 
@@ -510,32 +508,13 @@
 
             const endCoord = [lng, lat];
 
-            try {
-                const controller = new AbortController();
-                const timeoutId = setTimeout(() => controller.abort(), 3500);
+            showLoading("Calculando traçado da rota...");
+            const res = await fetchRouteBetweenCoords([startCoord, endCoord], 12000);
+            hideLoading();
 
-                const response = await fetch('https://api.openrouteservice.org/v2/directions/driving-car/geojson', {
-                    method: 'POST',
-                    headers: {
-                        'Authorization': ORS_API_KEY,
-                        'Content-Type': 'application/json'
-                    },
-                    body: JSON.stringify({ coordinates: [startCoord, endCoord] }),
-                    signal: controller.signal
-                });
-                clearTimeout(timeoutId);
-
-                if (response.ok) {
-                    const data = await response.json();
-                    if (data && data.features && data.features[0] && data.features[0].geometry) {
-                        currentRouteGeometry = data.features[0].geometry;
-                    } else {
-                        currentRouteGeometry = { 'type': 'LineString', 'coordinates': [startCoord, endCoord] };
-                    }
-                } else {
-                    currentRouteGeometry = { 'type': 'LineString', 'coordinates': [startCoord, endCoord] };
-                }
-            } catch (err) {
+            if (res && res.geometry) {
+                currentRouteGeometry = res.geometry;
+            } else {
                 currentRouteGeometry = { 'type': 'LineString', 'coordinates': [startCoord, endCoord] };
             }
 
@@ -552,30 +531,24 @@
             }
         }
 
-        /* Cancela a rota do endereço pesquisado e mantem o GPS funcionando normalmente */
         function cancelCustomSearchRoute() {
             isCustomSearchNav = false;
 
-            // Remove o traçado da rota do mapa
             currentRouteGeometry = null;
             updateRouteOnMap();
 
-            // Oculta o marcador da pesquisa
             if (searchMarker) {
                 searchMarker.remove();
                 searchMarker = null;
             }
 
-            // Oculta o painel superior de orientação
             document.getElementById('nav-header-panel').classList.add('hidden');
 
-            // Restaura o estado padrão dos botões para futuras entregas
             document.getElementById('nav-custom-search-actions').classList.add('hidden');
             document.getElementById('nav-delivery-actions').classList.remove('hidden');
             document.getElementById('nav-next-label').textContent = 'Próximo Destino';
         }
 
-        /* Pula a entrega atual e ajusta a rota para a próxima pendente mantendo status pendente */
         function skipCurrentDelivery() {
             if (!activePoints || activePoints.length === 0) return;
 
@@ -679,7 +652,6 @@
 
 	function setupDeviceOrientation() {
 		if (window.DeviceOrientationEvent && typeof DeviceOrientationEvent.requestPermission === 'function') {
-			// Suporte a permissão de orientação
 		}
 	}
 
@@ -828,7 +800,7 @@
                 arrowIcon.style.transform = `rotate(${arrowRotation}deg)`;
             }
 
-            /* RECÁLCULO AUTOMÁTICO SE SAIR DA ROTA + REMOÇÃO GRADUAL DA LINHA ATRÁS DO VEÍCULO */
+            /* RECÁLCULO AUTOMÁTICO SE SAIR DA ROTA (>45m) + REMOÇÃO GRADUAL DA LINHA ATRÁS DO VEÍCULO */
             if (isNavMode && currentRouteGeometry && currentRouteGeometry.coordinates && currentRouteGeometry.coordinates.length > 1) {
                 const coords = currentRouteGeometry.coordinates;
                 let closestIdx = 0;
@@ -842,7 +814,6 @@
                     }
                 }
 
-                // Se a distância até a linha da rota for maior que 45 metros, recalcula a rota da posição atual
                 const now = Date.now();
                 if (minD * 1000 > 45 && (now - lastRecalcTime > 6000)) {
                     lastRecalcTime = now;
@@ -917,7 +888,6 @@
             }
         }
 
-        /* PERMITE ATIVAR MODO NAVEGAÇÃO MESMO SEM PLANILHA ABERTA */
         function toggleNavigationMode(forceIdx = null) {
             isNavMode = !isNavMode;
 
@@ -950,7 +920,6 @@
                 if (activePoints && activePoints.length > 0) {
                     updateNavSegmentRoute(validIdx);
                 } else {
-                    // Se não houver planilha carregada, abre diretamente a caixa de pesquisa de endereço
                     toggleSearchBox(true);
                 }
             } else {
@@ -971,6 +940,67 @@
 
                 updateRouteOnMap();
             }
+        }
+
+        /* FUNÇÃO DE BUSCA HÍBRIDA RESILIENTE (ORS -> OSRM GET FALLBACK) */
+        async function fetchRouteBetweenCoords(coordinates, timeoutMs = 10000) {
+            if (!coordinates || coordinates.length < 2) return null;
+
+            // 1. Tenta OpenRouteService
+            try {
+                const controller = new AbortController();
+                const timeoutId = setTimeout(() => controller.abort(), timeoutMs);
+                const response = await fetch('https://api.openrouteservice.org/v2/directions/driving-car/geojson', {
+                    method: 'POST',
+                    headers: {
+                        'Authorization': ORS_API_KEY,
+                        'Content-Type': 'application/json'
+                    },
+                    body: JSON.stringify({ coordinates: coordinates }),
+                    signal: controller.signal
+                });
+                clearTimeout(timeoutId);
+
+                if (response.ok) {
+                    const data = await response.json();
+                    if (data && data.features && data.features[0] && data.features[0].geometry) {
+                        return {
+                            geometry: data.features[0].geometry,
+                            distanceMeters: data.features[0].properties?.summary?.distance || 0
+                        };
+                    }
+                }
+            } catch (err) {
+                // Em caso de erro de CORS no file:// passa para o fallback OSRM GET
+            }
+
+            // 2. Fallback OSRM via requisições GET simples (Não disparam preflight CORS no file://)
+            const osrmCoords = coordinates.map(c => `${c[0]},${c[1]}`).join(';');
+            const osrmEndpoints = [
+                `https://routing.openstreetmap.de/routed-car/route/v1/driving/${osrmCoords}?overview=full&geometries=geojson`,
+                `https://router.project-osrm.org/route/v1/driving/${osrmCoords}?overview=full&geometries=geojson`
+            ];
+
+            for (const url of osrmEndpoints) {
+                try {
+                    const controller = new AbortController();
+                    const timeoutId = setTimeout(() => controller.abort(), timeoutMs);
+                    const response = await fetch(url, { signal: controller.signal });
+                    clearTimeout(timeoutId);
+
+                    if (response.ok) {
+                        const data = await response.json();
+                        if (data && data.code === 'Ok' && data.routes && data.routes[0]) {
+                            return {
+                                geometry: data.routes[0].geometry,
+                                distanceMeters: data.routes[0].distance || 0
+                            };
+                        }
+                    }
+                } catch (err) {}
+            }
+
+            return null;
         }
 
         async function updateNavSegmentRoute(forceIdx = null) {
@@ -1011,32 +1041,10 @@
 
             const endCoord = [targetPoint.lng, targetPoint.lat];
 
-            try {
-                const controller = new AbortController();
-                const timeoutId = setTimeout(() => controller.abort(), 3500);
-
-                const response = await fetch('https://api.openrouteservice.org/v2/directions/driving-car/geojson', {
-                    method: 'POST',
-                    headers: {
-                        'Authorization': ORS_API_KEY,
-                        'Content-Type': 'application/json'
-                    },
-                    body: JSON.stringify({ coordinates: [startCoord, endCoord] }),
-                    signal: controller.signal
-                });
-                clearTimeout(timeoutId);
-
-                if (response.ok) {
-                    const data = await response.json();
-                    if (data && data.features && data.features[0] && data.features[0].geometry) {
-                        currentRouteGeometry = data.features[0].geometry;
-                    } else {
-                        currentRouteGeometry = { 'type': 'LineString', 'coordinates': [startCoord, endCoord] };
-                    }
-                } else {
-                    currentRouteGeometry = { 'type': 'LineString', 'coordinates': [startCoord, endCoord] };
-                }
-            } catch (err) {
+            const res = await fetchRouteBetweenCoords([startCoord, endCoord], 12000);
+            if (res && res.geometry) {
+                currentRouteGeometry = res.geometry;
+            } else {
                 currentRouteGeometry = { 'type': 'LineString', 'coordinates': [startCoord, endCoord] };
             }
 
@@ -1505,7 +1513,7 @@
             if (orderedDeliveries.length < 2) return null;
             const allCoordinates = orderedDeliveries.map(p => [p.lng, p.lat]);
 
-            const CHUNK_SIZE = 50;
+            const CHUNK_SIZE = 35;
             const chunks = [];
 
             for (let i = 0; i < allCoordinates.length - 1; i += (CHUNK_SIZE - 1)) {
@@ -1515,54 +1523,39 @@
                 }
             }
 
-            try {
-                const promises = chunks.map(chunk => {
-                    const controller = new AbortController();
-                    const timeoutId = setTimeout(() => controller.abort(), 3500);
+            let combinedCoordinates = [];
 
-                    return fetch('https://api.openrouteservice.org/v2/directions/driving-car/geojson', {
-                        method: 'POST',
-                        headers: {
-                            'Authorization': ORS_API_KEY,
-                            'Content-Type': 'application/json'
-                        },
-                        body: JSON.stringify({ coordinates: chunk }),
-                        signal: controller.signal
-                    }).then(res => {
-                        clearTimeout(timeoutId);
-                        return res.ok ? res.json() : null;
-                    }).catch(() => null);
-                });
+            for (let i = 0; i < chunks.length; i++) {
+                const chunk = chunks[i];
+                if (chunks.length > 1) {
+                    showLoading(`Calculando traçado das ruas (${i + 1}/${chunks.length})...`);
+                } else {
+                    showLoading("Calculando traçado das ruas...");
+                }
 
-                const results = await Promise.all(promises);
-                let combinedCoordinates = [];
+                const res = await fetchRouteBetweenCoords(chunk, 12000);
 
-                results.forEach((data, index) => {
-                    const chunk = chunks[index];
-                    if (data && data.features && data.features[0] && data.features[0].geometry) {
-                        const coords = data.features[0].geometry.coordinates;
-                        if (combinedCoordinates.length > 0) {
-                            combinedCoordinates.push(...coords.slice(1));
-                        } else {
-                            combinedCoordinates.push(...coords);
-                        }
+                if (res && res.geometry && res.geometry.coordinates) {
+                    const coords = res.geometry.coordinates;
+                    if (combinedCoordinates.length > 0) {
+                        combinedCoordinates.push(...coords.slice(1));
                     } else {
-                        const appendPts = combinedCoordinates.length > 0 ? chunk.slice(1) : chunk;
-                        combinedCoordinates.push(...appendPts);
+                        combinedCoordinates.push(...coords);
                     }
-                });
+                } else {
+                    const appendPts = combinedCoordinates.length > 0 ? chunk.slice(1) : chunk;
+                    combinedCoordinates.push(...appendPts);
+                }
 
-                return {
-                    'type': 'LineString',
-                    'coordinates': combinedCoordinates.length > 0 ? combinedCoordinates : allCoordinates
-                };
-            } catch (err) {
-                console.warn("Sem internet / Sinal oscilando. Utilizando traçado estimado.");
-                return {
-                    'type': 'LineString',
-                    'coordinates': allCoordinates
-                };
+                if (i < chunks.length - 1) {
+                    await new Promise(r => setTimeout(r, 200));
+                }
             }
+
+            return {
+                'type': 'LineString',
+                'coordinates': combinedCoordinates.length > 0 ? combinedCoordinates : allCoordinates
+            };
         }
 
         async function fetchFullDayTotalDistance(orderedDeliveries) {
@@ -1575,7 +1568,7 @@
                 [FIXED_HOME.lng, FIXED_HOME.lat]
             ];
 
-            const CHUNK_SIZE = 50;
+            const CHUNK_SIZE = 35;
             const chunks = [];
 
             for (let i = 0; i < fullCoords.length - 1; i += (CHUNK_SIZE - 1)) {
@@ -1585,40 +1578,23 @@
                 }
             }
 
-            try {
-                const promises = chunks.map(chunk => {
-                    const controller = new AbortController();
-                    const timeoutId = setTimeout(() => controller.abort(), 3500);
+            let totalMeters = 0;
+            let hasSuccess = false;
 
-                    return fetch('https://api.openrouteservice.org/v2/directions/driving-car/geojson', {
-                        method: 'POST',
-                        headers: {
-                            'Authorization': ORS_API_KEY,
-                            'Content-Type': 'application/json'
-                        },
-                        body: JSON.stringify({ coordinates: chunk }),
-                        signal: controller.signal
-                    }).then(res => {
-                        clearTimeout(timeoutId);
-                        return res.ok ? res.json() : null;
-                    }).catch(() => null);
-                });
-
-                const results = await Promise.all(promises);
-                let totalMeters = 0;
-                let hasSuccess = false;
-
-                results.forEach(data => {
-                    if (data && data.features && data.features[0] && data.features[0].properties) {
-                        totalMeters += data.features[0].properties.summary.distance;
-                        hasSuccess = true;
-                    }
-                });
-
-                if (hasSuccess) {
-                    return (totalMeters / 1000).toFixed(1);
+            for (let i = 0; i < chunks.length; i++) {
+                const res = await fetchRouteBetweenCoords(chunks[i], 12000);
+                if (res && res.distanceMeters > 0) {
+                    totalMeters += res.distanceMeters;
+                    hasSuccess = true;
                 }
-            } catch (err) {}
+                if (i < chunks.length - 1) {
+                    await new Promise(r => setTimeout(r, 150));
+                }
+            }
+
+            if (hasSuccess && totalMeters > 0) {
+                return (totalMeters / 1000).toFixed(1);
+            }
 
             let totalKm = haversine(FIXED_HOME, FIXED_PK2U);
             totalKm += haversine(FIXED_PK2U, orderedDeliveries[0]);
@@ -1990,7 +1966,8 @@
         }
     </script>
 	<script>
-    if ('serviceWorker' in navigator) {
+    // Registro condicional do Service Worker (Apenas em servidores HTTP/HTTPS)
+    if ('serviceWorker' in navigator && window.location.protocol.startsWith('http')) {
         window.addEventListener('load', () => {
             navigator.serviceWorker.register('./sw.js')
                 .then(reg => console.log('Service Worker registrado com sucesso!'))
