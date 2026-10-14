@@ -518,45 +518,48 @@ async function fetchDeliveryPolyline(orderedDeliveries) {
         }
     }
 
+    const promises = chunks.map(async (chunk) => {
+        // 1. Tenta via OSRM Público Primeiro (Sem limite de requisição e sem chave)
+        try {
+            const coordString = chunk.map(c => `${c[0]},${c[1]}`).join(';');
+            const osrmRes = await fetch(`https://router.project-osrm.org/route/v1/driving/${coordString}?overview=full&geometries=geojson`);
+            if (osrmRes.ok) {
+                const osrmData = await osrmRes.json();
+                if (osrmData && osrmData.routes && osrmData.routes[0] && osrmData.routes[0].geometry) {
+                    return osrmData.routes[0].geometry.coordinates;
+                }
+            }
+        } catch (e) {}
+
+        // 2. Fallback via OpenRouteService (com tratamento de erro silencioso)
+        try {
+            const controller = new AbortController();
+            const timeoutId = setTimeout(() => controller.abort(), 5000);
+
+            const res = await fetch('https://api.openrouteservice.org/v2/directions/driving-car/geojson', {
+                method: 'POST',
+                headers: {
+                    'Authorization': ORS_API_KEY,
+                    'Content-Type': 'application/json'
+                },
+                body: JSON.stringify({ coordinates: chunk }),
+                signal: controller.signal
+            });
+            clearTimeout(timeoutId);
+
+            if (res.ok) {
+                const data = await res.json();
+                if (data && data.features && data.features[0] && data.features[0].geometry) {
+                    return data.features[0].geometry.coordinates;
+                }
+            }
+        } catch (e) {}
+
+        // 3. Traçado em linha reta se os serviços falharem
+        return chunk;
+    });
+
     try {
-        const promises = chunks.map(async (chunk) => {
-            try {
-                const controller = new AbortController();
-                const timeoutId = setTimeout(() => controller.abort(), 8000);
-
-                const res = await fetch('https://api.openrouteservice.org/v2/directions/driving-car/geojson', {
-                    method: 'POST',
-                    headers: {
-                        'Authorization': ORS_API_KEY,
-                        'Content-Type': 'application/json'
-                    },
-                    body: JSON.stringify({ coordinates: chunk }),
-                    signal: controller.signal
-                });
-                clearTimeout(timeoutId);
-
-                if (res.ok) {
-                    const data = await res.json();
-                    if (data && data.features && data.features[0] && data.features[0].geometry) {
-                        return data.features[0].geometry.coordinates;
-                    }
-                }
-            } catch (e) {}
-
-            try {
-                const coordString = chunk.map(c => `${c[0]},${c[1]}`).join(';');
-                const osrmRes = await fetch(`https://router.project-osrm.org/route/v1/driving/${coordString}?overview=full&geometries=geojson`);
-                if (osrmRes.ok) {
-                    const osrmData = await osrmRes.json();
-                    if (osrmData && osrmData.routes && osrmData.routes[0] && osrmData.routes[0].geometry) {
-                        return osrmData.routes[0].geometry.coordinates;
-                    }
-                }
-            } catch (e) {}
-
-            return chunk;
-        });
-
         const results = await Promise.all(promises);
         let combinedCoordinates = [];
 
@@ -573,7 +576,6 @@ async function fetchDeliveryPolyline(orderedDeliveries) {
             'coordinates': combinedCoordinates.length > 0 ? combinedCoordinates : allCoordinates
         };
     } catch (err) {
-        console.warn("Sem conexão / Falha na rota. Utilizando traçado estimado.");
         return {
             'type': 'LineString',
             'coordinates': allCoordinates
