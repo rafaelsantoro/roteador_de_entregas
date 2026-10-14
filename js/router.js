@@ -584,9 +584,14 @@ async function updateNavSegmentRoute(forceIdx = null) {
         }
     }
 
-    const startCoord = lastGpsCoords 
-        ? [lastGpsCoords.lng, lastGpsCoords.lat] 
-        : (nextIdx > 0 ? [activePoints[nextIdx - 1].lng, activePoints[nextIdx - 1].lat] : [FIXED_PK2U.lng, FIXED_PK2U.lat]);
+    let startCoord;
+        if (lastGpsCoords) {
+            startCoord = [lastGpsCoords.lng, lastGpsCoords.lat];
+            isFallbackOrigin = false;
+        } else {
+            startCoord = (nextIdx > 0 ? [activePoints[nextIdx - 1].lng, activePoints[nextIdx - 1].lat] : [FIXED_PK2U.lng, FIXED_PK2U.lat]);
+            isFallbackOrigin = true; // Sinaliza que precisa de recálculo imediato assim que o GPS fixar
+        }
 
     const endCoord = [targetPoint.lng, targetPoint.lat];
 
