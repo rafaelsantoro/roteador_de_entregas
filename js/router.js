@@ -126,8 +126,116 @@ function haversine(p1, p2) {
     return R * 2 * Math.atan2(Math.sqrt(a), Math.sqrt(1-a));
 }
 
-function solveDeliveriesTSP(deliveries, manualFirstIdx, prioritizeSameStreet) {
+/* --- MATRIZ DE DISTÂNCIAS E OTIMIZAÇÃO PARA QUALQUER NÚMERO DE PONTOS (>50) --- */
+
+// Solicita a matriz ORS para um lote de até 50 coordenadas
+async function fetchDistanceMatrixChunk(locations) {
+    if (!navigator.onLine || !locations || locations.length < 2) return null;
+    if (locations.length > 50) return null; // Respeita o limite da API gratuita do ORS
+
+    const coords = locations.map(p => [p.lng, p.lat]);
+
+    try {
+        const controller = new AbortController();
+        const timeoutId = setTimeout(() => controller.abort(), 10000);
+
+        const response = await fetch('https://api.openrouteservice.org/v2/matrix/driving-car', {
+            method: 'POST',
+            headers: {
+                'Authorization': ORS_API_KEY,
+                'Content-Type': 'application/json'
+            },
+            body: JSON.stringify({
+                locations: coords,
+                metrics: ['distance']
+            }),
+            signal: controller.signal
+        });
+        clearTimeout(timeoutId);
+
+        if (!response.ok) return null;
+
+        const data = await response.json();
+        return data && data.distances ? data.distances : null;
+    } catch (e) {
+        console.warn("Falha no lote da matriz ORS. A aplicar fallback por Haversine.", e);
+        return null;
+    }
+}
+
+// Agrupa os pontos em clusters geográficos por proximidade (máx. 40 pontos por lote)
+function createSpatialClusters(deliveries, maxClusterSize = 40) {
     let unvisited = [...deliveries];
+    const clusters = [];
+
+    let currentCenter = FIXED_PK2U;
+
+    while (unvisited.length > 0) {
+        let seedIdx = 0;
+        let minSeedDist = Infinity;
+        for (let i = 0; i < unvisited.length; i++) {
+            let d = haversine(currentCenter, unvisited[i]);
+            if (d < minSeedDist) {
+                minSeedDist = d;
+                seedIdx = i;
+            }
+        }
+
+        const cluster = [];
+        let seed = unvisited.splice(seedIdx, 1)[0];
+        cluster.push(seed);
+
+        while (cluster.length < maxClusterSize && unvisited.length > 0) {
+            let lastPoint = cluster[cluster.length - 1];
+            let nearestIdx = 0;
+            let minDist = Infinity;
+
+            for (let i = 0; i < unvisited.length; i++) {
+                let d = haversine(lastPoint, unvisited[i]);
+                if (d < minDist) {
+                    minDist = d;
+                    nearestIdx = i;
+                }
+            }
+
+            cluster.push(unvisited.splice(nearestIdx, 1)[0]);
+        }
+
+        clusters.push(cluster);
+        currentCenter = cluster[cluster.length - 1];
+    }
+
+    return clusters;
+}
+
+// Otimiza um lote individual com a sua própria Matriz Real + refinamento 2-opt
+async function optimizeSingleCluster(clusterPoints, startOrigin, endDestination, prioritizeSameStreet, manualFirstIdx = -1) {
+    if (!clusterPoints || clusterPoints.length === 0) return [];
+    if (clusterPoints.length === 1) return [...clusterPoints];
+
+    const clusterLocations = [startOrigin, ...clusterPoints, endDestination];
+    const originIdx = 0;
+    const destIdx = clusterLocations.length - 1;
+
+    const deliveryWithIdx = clusterPoints.map((d, i) => ({ ...d, matrixIdx: i + 1 }));
+    const matrix = await fetchDistanceMatrixChunk(clusterLocations);
+
+    function getRawDist(i, j) {
+        if (matrix && matrix[i] && matrix[i][j] !== null && matrix[i][j] !== undefined) {
+            return matrix[i][j] / 1000.0;
+        }
+        return haversine(clusterLocations[i], clusterLocations[j]);
+    }
+
+    function getPenaltyDist(i, j, p1, p2) {
+        let d = getRawDist(i, j);
+        if (prioritizeSameStreet && p1 && p2 && p1.streetKey && p1.streetKey === p2.streetKey) {
+            return d - 1000.0;
+        }
+        return d;
+    }
+
+    let unvisited = [...deliveryWithIdx];
     let route = [];
 
     if (manualFirstIdx >= 0 && manualFirstIdx < unvisited.length) {
@@ -136,10 +244,11 @@ function solveDeliveriesTSP(deliveries, manualFirstIdx, prioritizeSameStreet) {
     }
 
     while (unvisited.length > 0) {
-        let current = route.length > 0 ? route[route.length - 1] : FIXED_PK2U;
-        let currentStreetKey = route.length > 0 ? route[route.length - 1].streetKey : '';
+        let currentItem = route.length > 0 ? route[route.length - 1] : null;
+        let currentIdx = currentItem ? currentItem.matrixIdx : originIdx;
+        let currentStreetKey = currentItem ? currentItem.streetKey : '';
 
-        let sameStreetCandidates = (prioritizeSameStreet && currentStreetKey) 
+        let sameStreetCandidates = (prioritizeSameStreet && currentStreetKey)
             ? unvisited.filter(p => p.streetKey && p.streetKey === currentStreetKey)
             : [];
 
@@ -151,7 +260,7 @@ function solveDeliveriesTSP(deliveries, manualFirstIdx, prioritizeSameStreet) {
         for (let i = 0; i < unvisited.length; i++) {
             let candidate = unvisited[i];
             if (candidatePool.includes(candidate)) {
-                let d = haversine(current, candidate);
+                let d = getRawDist(currentIdx, candidate.matrixIdx);
                 if (d < minDist) {
                     minDist = d;
                     nearestIdxInUnvisited = i;
@@ -160,14 +269,6 @@ function solveDeliveriesTSP(deliveries, manualFirstIdx, prioritizeSameStreet) {
         }
 
         route.push(unvisited.splice(nearestIdxInUnvisited, 1)[0]);
-    }
-
-    function getPenaltyDist(p1, p2) {
-        let d = haversine(p1, p2);
-        if (prioritizeSameStreet && p1.streetKey && p1.streetKey === p2.streetKey) {
-            return d - 1000.0;
-        }
-        return d;
     }
 
     let improved = true;
@@ -179,11 +280,19 @@ function solveDeliveriesTSP(deliveries, manualFirstIdx, prioritizeSameStreet) {
         count++;
         for (let i = startI; i < route.length - 1; i++) {
             for (let j = i + 1; j < route.length; j++) {
-                let prev = (i === 0) ? FIXED_PK2U : route[i - 1];
-                let next = (j === route.length - 1) ? FIXED_HOME : route[j + 1];
+                let prevItem = (i === 0) ? null : route[i - 1];
+                let prevIdx = prevItem ? prevItem.matrixIdx : originIdx;
+                let prevPoint = prevItem || startOrigin;
 
-                let d1 = getPenaltyDist(prev, route[i]) + getPenaltyDist(route[j], next);
-                let d2 = getPenaltyDist(prev, route[j]) + getPenaltyDist(route[i], next);
+                let nextItem = (j === route.length - 1) ? null : route[j + 1];
+                let nextIdx = nextItem ? nextItem.matrixIdx : destIdx;
+                let nextPoint = nextItem || endDestination;
+
+                let d1 = getPenaltyDist(prevIdx, route[i].matrixIdx, prevPoint, route[i]) +
+                         getPenaltyDist(route[j].matrixIdx, nextIdx, route[j], nextPoint);
+
+                let d2 = getPenaltyDist(prevIdx, route[j].matrixIdx, prevPoint, route[j]) +
+                         getPenaltyDist(route[i].matrixIdx, nextIdx, route[i], nextPoint);
 
                 if (d2 < d1) {
                     let segment = route.slice(i, j + 1).reverse();
@@ -194,7 +303,60 @@ function solveDeliveriesTSP(deliveries, manualFirstIdx, prioritizeSameStreet) {
         }
     }
 
-    return route;
+    return route.map(({ matrixIdx, ...rest }) => rest);
+}
+
+/* --- SOLVER PRINCIPAL (SUPORTA QUALQUER QUANTIDADE DE DESTINOS) --- */
+
+async function solveDeliveriesTSP(deliveries, manualFirstIdx, prioritizeSameStreet) {
+    if (!deliveries || deliveries.length === 0) return [];
+
+    if (deliveries.length <= 45) {
+        return await optimizeSingleCluster(deliveries, FIXED_PK2U, FIXED_HOME, prioritizeSameStreet, manualFirstIdx);
+    }
+
+    let workingDeliveries = [...deliveries];
+    let manualFirstPoint = null;
+
+    if (manualFirstIdx >= 0 && manualFirstIdx < workingDeliveries.length) {
+        manualFirstPoint = workingDeliveries.splice(manualFirstIdx, 1)[0];
+    }
+
+    const clusters = createSpatialClusters(workingDeliveries, 40);
+
+    if (manualFirstPoint) {
+        if (clusters.length > 0) {
+            clusters[0].unshift(manualFirstPoint);
+        } else {
+            clusters.push([manualFirstPoint]);
+        }
+    }
+
+    let finalRoute = [];
+    let currentOrigin = FIXED_PK2U;
+
+    for (let c = 0; c < clusters.length; c++) {
+        const isLastCluster = (c === clusters.length - 1);
+        const nextCluster = isLastCluster ? null : clusters[c + 1];
+        const clusterDestination = (nextCluster && nextCluster.length > 0) ? nextCluster[0] : FIXED_HOME;
+        const manualIdxInCluster = (c === 0 && manualFirstPoint) ? 0 : -1;
+
+        const optimizedCluster = await optimizeSingleCluster(
+            clusters[c],
+            currentOrigin,
+            clusterDestination,
+            prioritizeSameStreet,
+            manualIdxInCluster
+        );
+
+        finalRoute.push(...optimizedCluster);
+
+        if (optimizedCluster.length > 0) {
+            currentOrigin = optimizedCluster[optimizedCluster.length - 1];
+        }
+    }
+
+    return finalRoute;
 }
 
 function applyMarkerJitter(points) {
@@ -681,7 +843,7 @@ async function optimizeAndDrawRoute() {
         const firstIdx = parseInt(document.getElementById('start-point-select').value);
         const prioritizeSameStreet = document.getElementById('prioritize-same-street').checked;
 
-        activePoints = solveDeliveriesTSP(rawData, firstIdx, prioritizeSameStreet);
+        activePoints = await solveDeliveriesTSP(rawData, firstIdx, prioritizeSameStreet);
         await renderMapAndUI(activePoints, true);
 
         document.getElementById('btn-qrcode-scan').disabled = false;
