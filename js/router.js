@@ -15,12 +15,34 @@ function extractHouseNumber(address) {
 
 function normalizeStreetName(address) {
     if (!address || typeof address !== 'string') return '';
-    let part = address.split(',')[0].split('-')[0];
-    part = part.replace(/\d.*/, '');
-    part = part.normalize('NFD').replace(/[\u0300-\u036f]/g, '');
-    part = part.toLowerCase().trim();
+    
+    // 1. Pega a parte do endereço antes da vírgula
+    let part = address.split(',')[0].split('-')[0].trim();
+    
+    // 2. Remove acentos e converte para minúsculas
+    part = part.normalize('NFD').replace(/[\u0300-\u036f]/g, '').toLowerCase().trim();
+    
+    // 3. Normaliza abreviações comuns para garantir correspondência
+    part = part.replace(/\bprof\b|\bprof\./g, 'professor')
+               .replace(/\bdr\b|\bdr\./g, 'doutor')
+               .replace(/\bdra\b|\bdra\./g, 'doutora')
+               .replace(/\bs\b|\bs\./g, 'sao')
+               .replace(/\bsto\b|\bsto\./g, 'santo')
+               .replace(/\bsta\b|\bsta\./g, 'santa')
+               .replace(/\bjd\b|\bjd\./g, 'jardim')
+               .replace(/\bvl\b|\bvl\./g, 'vila')
+               .replace(/\bpq\b|\bpq\./g, 'parque')
+               .replace(/\bres\b|\bres\./g, 'residencial');
+               
+    // 4. Remove prefixos de logradouro
     part = part.replace(/^(rua|r\.|r|avenida|av\.|av|alameda|al\.|al|praca|prc\.|prc|travessa|trv\.|trv|rodovia|rod\.|rod)\s+/, '');
+    
+    // 5. Remove apenas o número da residência no final da rua (ex: "sao paulo 123" -> "sao paulo")
+    part = part.replace(/\s+\d+[a-z]?\s*$/i, '');
+    
+    // 6. Limpa caracteres especiais e espaços extras
     part = part.replace(/[^a-z0-9\s]/g, '').replace(/\s+/g, ' ').trim();
+    
     return part;
 }
 
@@ -226,7 +248,7 @@ async function optimizeSingleCluster(clusterPoints, startOrigin, endDestination,
 
     function getPenaltyDist(i, j, p1, p2) {
         let d = getRawDist(i, j);
-        if (prioritizeSameStreet && p1 && p2 && p1.streetKey && p1.streetKey === p2.streetKey) {
+        if (prioritizeSameStreet && p1 && p2 && p1.streetKey && p2.streetKey && p1.streetKey === p2.streetKey) {
             return d - 1000.0;
         }
         return d;
