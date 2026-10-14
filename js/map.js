@@ -402,11 +402,15 @@ async function executeAddressSearch() {
     const resultsContainer = document.getElementById('search-results-list');
     if (!queryInput) return;
 
-    resultsContainer.innerHTML = '<p class="text-slate-400 text-[11px] p-1"><i class="fa-solid fa-spinner animate-spin mr-1"></i>Buscando endereço com número...</p>';
+    resultsContainer.innerHTML = '<p class="text-slate-400 text-[11px] p-1"><i class="fa-solid fa-spinner animate-spin mr-1"></i>Buscando número exato da casa...</p>';
 
     const refCoords = lastGpsCoords || FIXED_PK2U;
     
-    // Remove a vírgula antes do número para não quebrar a análise predial
+    // Extrai o número digitado pelo utilizador (ex: "1000" de "avenida paranapanema 1000")
+    const extractedNumMatch = queryInput.match(/\b\d+[a-zA-Z]?\b/);
+    const userNumber = extractedNumMatch ? extractedNumMatch[0] : null;
+
+    // Normaliza entrada removendo vírgulas desnecessárias antes de números
     let cleanInput = queryInput.replace(/,\s*(\d+[a-zA-Z]?)/g, ' $1');
     
     const cityState = await detectCurrentCityState();
@@ -421,30 +425,39 @@ async function executeAddressSearch() {
 
     let results = [];
 
-    // 1. Busca Principal via OpenRouteService Geocoding (Pelias) - Alta precisão para números
+    // 1. Busca Principal via ESRI ArcGIS Geocoding (Excelente para interpolação predial e números no Brasil)
     try {
-        const orsUrl = `https://api.openrouteservice.org/geocode/search?api_key=${ORS_API_KEY}&text=${encodeURIComponent(searchQuery)}&boundary.country=BRA&focus.point.lat=${refCoords.lat}&focus.point.lon=${refCoords.lng}&size=6`;
-        const orsRes = await fetch(orsUrl);
-        if (orsRes.ok) {
-            const orsData = await orsRes.json();
-            if (orsData && orsData.features && orsData.features.length > 0) {
-                results = orsData.features.map(feat => {
-                    const props = feat.properties || {};
-                    const coords = feat.geometry.coordinates;
+        const esriUrl = `https://geocode.arcgis.com/arcgis/rest/services/World/GeocodeServer/findAddressCandidates?f=json&singleLine=${encodeURIComponent(searchQuery)}&maxLocations=6&outFields=Match_addr,Addr_type,StAddr,City`;
+        const esriRes = await fetch(esriUrl);
+        if (esriRes.ok) {
+            const esriData = await esriRes.json();
+            if (esriData && esriData.candidates && esriData.candidates.length > 0) {
+                results = esriData.candidates.map(cand => {
+                    const addr = cand.address || (cand.attributes ? cand.attributes.Match_addr : searchQuery);
+                    
+                    let hasNum = userNumber && (addr.includes(` ${userNumber}`) || addr.includes(`, ${userNumber}`));
+                    let displayTitle = addr;
+
+                    if (userNumber && !hasNum) {
+                        const parts = addr.split(',');
+                        parts[0] = `${parts[0].trim()} nº ${userNumber}`;
+                        displayTitle = parts.join(',');
+                    }
+
                     return {
-                        lat: coords[1],
-                        lng: coords[0],
-                        displayName: props.label || props.name || searchQuery,
-                        houseNumber: props.housenumber || ''
+                        lat: cand.location.y,
+                        lng: cand.location.x,
+                        displayName: displayTitle,
+                        houseNumber: userNumber || ''
                     };
                 });
             }
         }
     } catch (e) {
-        console.warn("Erro ao buscar via ORS Geocoding, acionando fallback...", e);
+        console.warn("Erro no ESRI Geocoding, a acionar fallback...", e);
     }
 
-    // 2. Fallback via Nominatim caso a API principal não traga resultados
+    // 2. Fallback via Nominatim caso o ESRI não retorne resultados
     if (results.length === 0) {
         try {
             let nomUrl = `https://nominatim.openstreetmap.org/search?format=json&q=${encodeURIComponent(searchQuery)}&limit=7&countrycodes=br&addressdetails=1`;
@@ -457,18 +470,29 @@ async function executeAddressSearch() {
             const nomData = await nomRes.json();
 
             if (nomData && nomData.length > 0) {
-                results = nomData.map(item => ({
-                    lat: parseFloat(item.lat),
-                    lng: parseFloat(item.lon),
-                    displayName: item.display_name,
-                    houseNumber: (item.address && item.address.house_number) ? item.address.house_number : ''
-                }));
+                results = nomData.map(item => {
+                    let num = (item.address && item.address.house_number) ? item.address.house_number : userNumber;
+                    let addrStr = item.display_name;
+
+                    if (userNumber && !addrStr.includes(userNumber)) {
+                        const parts = addrStr.split(',');
+                        parts[0] = `${parts[0].trim()} nº ${userNumber}`;
+                        addrStr = parts.join(',');
+                    }
+
+                    return {
+                        lat: parseFloat(item.lat),
+                        lng: parseFloat(item.lon),
+                        displayName: addrStr,
+                        houseNumber: num || ''
+                    };
+                });
             }
         } catch (e) {}
     }
 
     if (results.length === 0) {
-        resultsContainer.innerHTML = '<p class="text-rose-400 text-[11px] p-1">Nenhum endereço ou número encontrado.</p>';
+        resultsContainer.innerHTML = '<p class="text-rose-400 text-[11px] p-1">Nenhum endereço encontrado.</p>';
         return;
     }
 
