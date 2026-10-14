@@ -126,35 +126,37 @@ document.addEventListener('DOMContentLoaded', () => {
     }
 
 map = new maplibregl.Map({
-    container: 'map',
-    style: {
-        version: 8,
-        sources: {
-            'osm-tiles': {
-                type: 'raster',
-                tiles: [
-                    'https://a.tile.openstreetmap.org/{z}/{x}/{y}.png',
-                    'https://b.tile.openstreetmap.org/{z}/{x}/{y}.png',
-                    'https://c.tile.openstreetmap.org/{z}/{x}/{y}.png'
-                ],
-                tileSize: 128,
-                attribution: '&copy; OpenStreetMap contributors'
-            }
+        container: 'map',
+        maxZoom: 20,
+        style: {
+            version: 8,
+            sources: {
+                'osm-tiles': {
+                    type: 'raster',
+                    tiles: [
+                        'https://a.tile.openstreetmap.org/{z}/{x}/{y}.png',
+                        'https://b.tile.openstreetmap.org/{z}/{x}/{y}.png',
+                        'https://c.tile.openstreetmap.org/{z}/{x}/{y}.png'
+                    ],
+                    tileSize: 128,
+                    maxnativezoom: 18, // Ajustado para o limite da escala de 128px
+                    attribution: '&copy; OpenStreetMap contributors'
+                }
+            },
+            layers: [
+                {
+                    id: 'osm-tiles-layer',
+                    type: 'raster',
+                    source: 'osm-tiles',
+                    minzoom: 0,
+                    maxzoom: 22
+                }
+            ]
         },
-        layers: [
-            {
-                id: 'osm-tiles-layer',
-                type: 'raster',
-                source: 'osm-tiles',
-                minzoom: 0,
-                maxzoom: 19
-            }
-        ]
-    },
-    pixelRatio: window.devicePixelRatio || 2,
-    center: [-48.91, -23.10],
-    zoom: 16
-});
+        pixelRatio: window.devicePixelRatio || 2,
+        center: [-48.91, -23.10],
+        zoom: 16
+    });
 
     map.addControl(new maplibregl.NavigationControl({ showCompass: false }), 'bottom-right');
 
