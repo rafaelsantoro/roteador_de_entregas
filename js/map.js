@@ -1,6 +1,5 @@
-/* --- MANIPULAÇÃO DO MAPA ESCURO, GPS, NAVEGAÇÃO 3D E BUSCA OSM (NOMINATIM) --- */
+/* --- MANIPULAÇÃO DO MAPA, GPS, NAVEGAÇÃO 3D E BUSCA COM RECALCULO AUTOMÁTICO --- */
 
-// Variáveis Globais de Animação, Interpolação e Localização
 let navAnimFrame = null;
 let visualPos = null;
 let visualHeading = 0;
@@ -70,7 +69,7 @@ function enable3DBuildings() {
                 'type': 'fill-extrusion',
                 'minzoom': 14,
                 'paint': {
-                    'fill-extrusion-color': '#334155', // Tom escuro para prédios 3D
+                    'fill-extrusion-color': '#334155',
                     'fill-extrusion-height': ['coalesce', ['get', 'render_height'], ['get', 'height'], 12],
                     'fill-extrusion-base': ['coalesce', ['get', 'render_min_height'], ['get', 'min_height'], 0],
                     'fill-extrusion-opacity': 0.75
@@ -232,7 +231,6 @@ function onGpsSuccess(position) {
     }
     lastGpsTimestamp = now;
     
-    const isFirstGps = !lastGpsCoords;
     let newTargetHeading = null;
 
     if (lastGpsCoords) {
@@ -280,6 +278,7 @@ function onGpsSuccess(position) {
 
     startNavAnimationLoop();
 
+    // Monitorização de Posição e Recálculo
     if (isNavMode && fullNavRouteGeometry && fullNavRouteGeometry.coordinates && fullNavRouteGeometry.coordinates.length > 1) {
         const fullCoords = fullNavRouteGeometry.coordinates;
         let closestIdx = 0;
@@ -296,8 +295,11 @@ function onGpsSuccess(position) {
         const currentTimestamp = Date.now();
         const distMeters = minD * 1000;
 
-        if (distMeters > 40 && (currentTimestamp - lastRecalcTime > 5000)) {
+        // Se a rota usava ponto temporário ou se o veículo desviou mais de 35 metros, força recálculo direto do GPS atual
+        if ((isFallbackOrigin || distMeters > 35) && (currentTimestamp - lastRecalcTime > 3000)) {
             lastRecalcTime = currentTimestamp;
+            isFallbackOrigin = false;
+
             if (isCustomSearchNav && searchMarker) {
                 const targetLngLat = searchMarker.getLngLat();
                 const addressText = document.getElementById('nav-next-address').textContent;
@@ -321,10 +323,6 @@ function onGpsSuccess(position) {
                 }
             }
         }
-    }
-
-    if (isNavMode && map && isFirstGps && currentNavIndex >= 0 && !isCustomSearchNav && activePoints && activePoints.length > 0) {
-        updateNavSegmentRoute(currentNavIndex);
     }
 }
 
@@ -397,7 +395,7 @@ async function toggleSearchBox(forceOpen) {
     }
 }
 
-/* --- BUSCA EXCLUSIVA OPENSTREETMAP (NOMINATIM) --- */
+/* --- BUSCA OPENSTREETMAP (NOMINATIM) --- */
 
 async function executeAddressSearch() {
     const queryInput = document.getElementById('search-address-input').value.trim();
@@ -529,9 +527,14 @@ async function navigateToSearchLocation(lat, lng, name) {
     document.getElementById('nav-next-title').textContent = 'Endereço Pesquisado';
     document.getElementById('nav-next-address').textContent = name || 'Local pesquisado';
 
-    const startCoord = lastGpsCoords 
-        ? [lastGpsCoords.lng, lastGpsCoords.lat] 
-        : [FIXED_PK2U.lng, FIXED_PK2U.lat];
+    let startCoord;
+    if (lastGpsCoords) {
+        startCoord = [lastGpsCoords.lng, lastGpsCoords.lat];
+        isFallbackOrigin = false;
+    } else {
+        startCoord = [FIXED_PK2U.lng, FIXED_PK2U.lat];
+        isFallbackOrigin = true; // Rota iniciada com ponto temporário
+    }
 
     const endCoord = [lng, lat];
 
