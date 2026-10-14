@@ -13,13 +13,14 @@ let activePoints = [];
 let map;
 let markersMap = new Map();
 let currentRouteGeometry = null;
-let fullNavRouteGeometry = null; // Preserva a geometria completa do segmento de navegação
+let fullNavRouteGeometry = null;
 let currentRouteDistanceKm = '0';
 
 // Modo Navegação, Bússola e 3D
 let isNavMode = false;
 let is3DMode = false;
 let isCustomSearchNav = false;
+let isFallbackOrigin = false; // Identifica se a rota foi gerada com ponto de origem temporário
 let currentNavIndex = -1;
 let smoothedHeading = 0;
 let lastGpsCoords = null;
