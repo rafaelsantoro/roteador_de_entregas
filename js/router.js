@@ -1,16 +1,16 @@
 /* --- CÁLCULO DE ROTAS, TSP E EXPORTAÇÕES --- */
 
 function extractHouseNumber(address) {
-    if (!address || typeof address !== 'string') return '';
+    if (!address || typeof address !== 'string') return null;
     let parts = address.split(',');
     if (parts.length > 1) {
         let afterComma = parts[1].trim().split('-')[0].split('(')[0].trim();
-        let match = afterComma.match(/\d+[a-zA-Z]?/);
-        if (match) return match[0];
+        let match = afterComma.match(/\d+/);
+        if (match) return parseInt(match[0], 10);
     }
-    let matchNoComma = address.split('-')[0].match(/\b\d+[a-zA-Z]?\b/);
-    if (matchNoComma) return matchNoComma[0];
-    return '';
+    let matchNoComma = address.split('-')[0].match(/\b\d+\b/);
+    if (matchNoComma) return parseInt(matchNoComma[0], 10);
+    return null;
 }
 
 function normalizeStreetName(address) {
@@ -139,33 +139,60 @@ function haversine(p1, p2) {
     return R * 2 * Math.atan2(Math.sqrt(a), Math.sqrt(1-a));
 }
 
-/* --- ORDENAÇÃO DE PONTOS DA MESMA RUA --- */
+/* --- ORDENAÇÃO SEQUENCIAL POR NÚMERO DE CASA E BLOCO DE RUA --- */
 
-function orderStreetBlock(streetPoints, startOrigin) {
+function sortStreetByHouseNumbers(streetPoints, startPos) {
     if (!streetPoints || streetPoints.length <= 1) return [...streetPoints];
 
-    let unvisited = [...streetPoints];
-    let ordered = [];
-    let currentPos = startOrigin;
+    const withNum = streetPoints.map(p => ({
+        point: p,
+        num: extractHouseNumber(p.address)
+    }));
 
-    while (unvisited.length > 0) {
-        let nearestIdx = 0;
-        let minDist = Infinity;
+    const validNums = withNum.filter(item => item.num !== null);
 
-        for (let i = 0; i < unvisited.length; i++) {
-            let d = haversine(currentPos, unvisited[i]);
-            if (d < minDist) {
-                minDist = d;
-                nearestIdx = i;
+    // Se a maioria dos pontos não tem número identificável, usa proximidade encadeada
+    if (validNums.length < streetPoints.length * 0.5) {
+        let unvisited = [...streetPoints];
+        let ordered = [];
+        let curr = startPos;
+        while (unvisited.length > 0) {
+            let nearestIdx = 0;
+            let minDist = Infinity;
+            for (let i = 0; i < unvisited.length; i++) {
+                let d = haversine(curr, unvisited[i]);
+                if (d < minDist) {
+                    minDist = d;
+                    nearestIdx = i;
+                }
             }
+            let nextPt = unvisited.splice(nearestIdx, 1)[0];
+            ordered.push(nextPt);
+            curr = nextPt;
         }
-
-        let nextPt = unvisited.splice(nearestIdx, 1)[0];
-        ordered.push(nextPt);
-        currentPos = nextPt;
+        return ordered;
     }
 
-    return ordered;
+    // Ordena todos os pontos em ordem crescente de número da casa
+    const sortedAsc = [...withNum].sort((a, b) => {
+        let numA = a.num !== null ? a.num : 999999;
+        let numB = b.num !== null ? b.num : 999999;
+        return numA - numB;
+    }).map(item => item.point);
+
+    // Identifica qual extremo da rua está mais próximo do ponto de origem do veículo
+    const firstPoint = sortedAsc[0];
+    const lastPoint = sortedAsc[sortedAsc.length - 1];
+
+    const distToFirst = haversine(startPos, firstPoint);
+    const distToLast = haversine(startPos, lastPoint);
+
+    // Se estiver mais perto do final da rua (número maior), percorre em ordem decrescente
+    if (distToLast < distToFirst) {
+        return sortedAsc.reverse();
+    }
+
+    return sortedAsc;
 }
 
 function groupDeliveriesByStreetBlock(deliveries, startOrigin) {
@@ -198,7 +225,7 @@ function groupDeliveriesByStreetBlock(deliveries, startOrigin) {
 
         const selectedKey = unvisitedKeys.splice(bestKeyIdx, 1)[0];
         const block = streetGroups[selectedKey];
-        const orderedBlock = orderStreetBlock(block, currentPos);
+        const orderedBlock = sortStreetByHouseNumbers(block, currentPos);
 
         finalRoute.push(...orderedBlock);
         if (orderedBlock.length > 0) {
@@ -373,7 +400,7 @@ async function solveDeliveriesTSP(deliveries, manualFirstIdx, prioritizeSameStre
 
     let workingDeliveries = [...deliveries];
 
-    // PRÉ-AGRUPAMENTO: Se o usuário definiu 1ª entrega manual e quer priorizar a mesma rua
+    // PRÉ-AGRUPAMENTO: Se o usuário definiu a 1ª entrega manual E quer priorizar a mesma rua
     if (manualFirstIdx >= 0 && manualFirstIdx < workingDeliveries.length && prioritizeSameStreet) {
         const selectedPoint = workingDeliveries[manualFirstIdx];
         const targetStreet = selectedPoint.streetKey;
@@ -383,7 +410,7 @@ async function solveDeliveriesTSP(deliveries, manualFirstIdx, prioritizeSameStre
             const otherDeliveries = workingDeliveries.filter(p => p.streetKey !== targetStreet);
 
             const remainingSameStreet = sameStreetDeliveries.filter(p => p.id !== selectedPoint.id);
-            const orderedFirstStreet = [selectedPoint, ...orderStreetBlock(remainingSameStreet, selectedPoint)];
+            const orderedFirstStreet = [selectedPoint, ...sortStreetByHouseNumbers(remainingSameStreet, selectedPoint)];
 
             const lastPointFirstStreet = orderedFirstStreet[orderedFirstStreet.length - 1];
             const optimizedOthers = await solveDeliveriesTSP(otherDeliveries, -1, prioritizeSameStreet);
