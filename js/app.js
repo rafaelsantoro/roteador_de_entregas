@@ -125,9 +125,9 @@ document.addEventListener('DOMContentLoaded', () => {
         if (warnBox) warnBox.classList.remove('hidden');
     }
 
-map = new maplibregl.Map({
+    map = new maplibregl.Map({
         container: 'map',
-        maxZoom: 20,
+        maxZoom: 20, // Limite máximo de zoom da câmera para o usuário
         style: {
             version: 8,
             sources: {
@@ -138,8 +138,8 @@ map = new maplibregl.Map({
                         'https://b.tile.openstreetmap.org/{z}/{x}/{y}.png',
                         'https://c.tile.openstreetmap.org/{z}/{x}/{y}.png'
                     ],
-                    tileSize: 128,
-                    maxnativezoom: 18, // Ajustado para o limite da escala de 128px
+                    tileSize: 256, // Tamanho padrão dos tiles do OpenStreetMap
+                    maxzoom: 19,   // Limite do servidor do OSM. O MapLibre para as requisições aqui e estica a imagem nos zooms maiores
                     attribution: '&copy; OpenStreetMap contributors'
                 }
             },
