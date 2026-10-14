@@ -391,11 +391,13 @@ function applyMarkerJitter(points) {
     });
 }
 
+/* --- BUSCA O TRAÇADO REAL DAS RUAS PARA A ROTA COMPLETA --- */
+
 async function fetchDeliveryPolyline(orderedDeliveries) {
-    if (orderedDeliveries.length < 2) return null;
+    if (!orderedDeliveries || orderedDeliveries.length < 2) return null;
     const allCoordinates = orderedDeliveries.map(p => [p.lng, p.lat]);
 
-    const CHUNK_SIZE = 50;
+    const CHUNK_SIZE = 20;
     const chunks = [];
 
     for (let i = 0; i < allCoordinates.length - 1; i += (CHUNK_SIZE - 1)) {
@@ -406,41 +408,57 @@ async function fetchDeliveryPolyline(orderedDeliveries) {
     }
 
     try {
-        const promises = chunks.map(chunk => {
-            const controller = new AbortController();
-            const timeoutId = setTimeout(() => controller.abort(), 10000);
+        const promises = chunks.map(async (chunk) => {
+            // 1. Tenta via OpenRouteService
+            try {
+                const controller = new AbortController();
+                const timeoutId = setTimeout(() => controller.abort(), 8000);
 
-            return fetch('https://api.openrouteservice.org/v2/directions/driving-car/geojson', {
-                method: 'POST',
-                headers: {
-                    'Authorization': ORS_API_KEY,
-                    'Content-Type': 'application/json'
-                },
-                body: JSON.stringify({ 
-                    coordinates: chunk
-                }),
-                signal: controller.signal
-            }).then(res => {
+                const res = await fetch('https://api.openrouteservice.org/v2/directions/driving-car/geojson', {
+                    method: 'POST',
+                    headers: {
+                        'Authorization': ORS_API_KEY,
+                        'Content-Type': 'application/json'
+                    },
+                    body: JSON.stringify({ 
+                        coordinates: chunk
+                    }),
+                    signal: controller.signal
+                });
                 clearTimeout(timeoutId);
-                return res.ok ? res.json() : null;
-            }).catch(() => null);
+
+                if (res.ok) {
+                    const data = await res.json();
+                    if (data && data.features && data.features[0] && data.features[0].geometry) {
+                        return data.features[0].geometry.coordinates;
+                    }
+                }
+            } catch (e) {}
+
+            // 2. Fallback via OSRM público
+            try {
+                const coordString = chunk.map(c => `${c[0]},${c[1]}`).join(';');
+                const osrmRes = await fetch(`https://router.project-osrm.org/route/v1/driving/${coordString}?overview=full&geometries=geojson`);
+                if (osrmRes.ok) {
+                    const osrmData = await osrmRes.json();
+                    if (osrmData && osrmData.routes && osrmData.routes[0] && osrmData.routes[0].geometry) {
+                        return osrmData.routes[0].geometry.coordinates;
+                    }
+                }
+            } catch (e) {}
+
+            // 3. Sequência direta do lote se ambos falharem
+            return chunk;
         });
 
         const results = await Promise.all(promises);
         let combinedCoordinates = [];
 
-        results.forEach((data, index) => {
-            const chunk = chunks[index];
-            if (data && data.features && data.features[0] && data.features[0].geometry) {
-                const coords = data.features[0].geometry.coordinates;
-                if (combinedCoordinates.length > 0) {
-                    combinedCoordinates.push(...coords.slice(1));
-                } else {
-                    combinedCoordinates.push(...coords);
-                }
+        results.forEach((coords) => {
+            if (combinedCoordinates.length > 0) {
+                combinedCoordinates.push(...coords.slice(1));
             } else {
-                const appendPts = combinedCoordinates.length > 0 ? chunk.slice(1) : chunk;
-                combinedCoordinates.push(...appendPts);
+                combinedCoordinates.push(...coords);
             }
         });
 
@@ -449,7 +467,7 @@ async function fetchDeliveryPolyline(orderedDeliveries) {
             'coordinates': combinedCoordinates.length > 0 ? combinedCoordinates : allCoordinates
         };
     } catch (err) {
-        console.warn("Sem internet / Sinal oscilando. Utilizando traçado estimado.");
+        console.warn("Sem conexão / Falha na rota. Utilizando traçado estimado.");
         return {
             'type': 'LineString',
             'coordinates': allCoordinates
@@ -457,8 +475,10 @@ async function fetchDeliveryPolyline(orderedDeliveries) {
     }
 }
 
+/* --- CÁLCULO DA DISTÂNCIA TOTAL DO DIA EM KM --- */
+
 async function fetchFullDayTotalDistance(orderedDeliveries) {
-    if (orderedDeliveries.length === 0) return '0';
+    if (!orderedDeliveries || orderedDeliveries.length === 0) return '0';
 
     const fullCoords = [
         [FIXED_HOME.lng, FIXED_HOME.lat],
@@ -467,7 +487,7 @@ async function fetchFullDayTotalDistance(orderedDeliveries) {
         [FIXED_HOME.lng, FIXED_HOME.lat]
     ];
 
-    const CHUNK_SIZE = 50;
+    const CHUNK_SIZE = 20;
     const chunks = [];
 
     for (let i = 0; i < fullCoords.length - 1; i += (CHUNK_SIZE - 1)) {
@@ -478,33 +498,53 @@ async function fetchFullDayTotalDistance(orderedDeliveries) {
     }
 
     try {
-        const promises = chunks.map(chunk => {
-            const controller = new AbortController();
-            const timeoutId = setTimeout(() => controller.abort(), 10000);
+        const promises = chunks.map(async (chunk) => {
+            // 1. Tenta ORS
+            try {
+                const controller = new AbortController();
+                const timeoutId = setTimeout(() => controller.abort(), 8000);
 
-            return fetch('https://api.openrouteservice.org/v2/directions/driving-car/geojson', {
-                method: 'POST',
-                headers: {
-                    'Authorization': ORS_API_KEY,
-                    'Content-Type': 'application/json'
-                },
-                body: JSON.stringify({ 
-                    coordinates: chunk
-                }),
-                signal: controller.signal
-            }).then(res => {
+                const res = await fetch('https://api.openrouteservice.org/v2/directions/driving-car/geojson', {
+                    method: 'POST',
+                    headers: {
+                        'Authorization': ORS_API_KEY,
+                        'Content-Type': 'application/json'
+                    },
+                    body: JSON.stringify({ coordinates: chunk }),
+                    signal: controller.signal
+                });
                 clearTimeout(timeoutId);
-                return res.ok ? res.json() : null;
-            }).catch(() => null);
+
+                if (res.ok) {
+                    const data = await res.json();
+                    if (data && data.features && data.features[0] && data.features[0].properties) {
+                        return data.features[0].properties.summary.distance;
+                    }
+                }
+            } catch (e) {}
+
+            // 2. Fallback OSRM
+            try {
+                const coordString = chunk.map(c => `${c[0]},${c[1]}`).join(';');
+                const osrmRes = await fetch(`https://router.project-osrm.org/route/v1/driving/${coordString}?overview=false`);
+                if (osrmRes.ok) {
+                    const osrmData = await osrmRes.json();
+                    if (osrmData && osrmData.routes && osrmData.routes[0]) {
+                        return osrmData.routes[0].distance;
+                    }
+                }
+            } catch (e) {}
+
+            return null;
         });
 
         const results = await Promise.all(promises);
         let totalMeters = 0;
         let hasSuccess = false;
 
-        results.forEach(data => {
-            if (data && data.features && data.features[0] && data.features[0].properties) {
-                totalMeters += data.features[0].properties.summary.distance;
+        results.forEach(dist => {
+            if (dist !== null && !isNaN(dist)) {
+                totalMeters += dist;
                 hasSuccess = true;
             }
         });
@@ -522,6 +562,8 @@ async function fetchFullDayTotalDistance(orderedDeliveries) {
     totalKm += haversine(orderedDeliveries[orderedDeliveries.length - 1], FIXED_HOME);
     return totalKm.toFixed(1);
 }
+
+/* --- ATUALIZAR TRAÇADO DO SEGMENTO ATUAL NO MODO NAVEGAÇÃO --- */
 
 async function updateNavSegmentRoute(forceIdx = null) {
     if (!activePoints || activePoints.length === 0) return;
@@ -594,7 +636,7 @@ async function updateNavSegmentRoute(forceIdx = null) {
     const endCoord = [targetPoint.lng, targetPoint.lat];
     let routeFound = false;
 
-    // 1. Tenta via OpenRouteService (sem o parâmetro radiuses que causava o erro 400)
+    // 1. Tenta via OpenRouteService
     try {
         const controller = new AbortController();
         const timeoutId = setTimeout(() => controller.abort(), 6000);
@@ -622,7 +664,7 @@ async function updateNavSegmentRoute(forceIdx = null) {
         }
     } catch (err) {}
 
-    // 2. Fallback via OSRM público (caso exceda o limite de requisições por minuto do ORS)
+    // 2. Fallback via OSRM público
     if (!routeFound) {
         try {
             const osrmUrl = `https://router.project-osrm.org/route/v1/driving/${startCoord[0]},${startCoord[1]};${endCoord[0]},${endCoord[1]}?overview=full&geometries=geojson`;
@@ -638,7 +680,7 @@ async function updateNavSegmentRoute(forceIdx = null) {
         } catch (e) {}
     }
 
-    // 3. Linha reta como último recurso (apenas sem internet)
+    // 3. Linha reta como último recurso (offline)
     if (!routeFound) {
         fullNavRouteGeometry = { 'type': 'LineString', 'coordinates': [startCoord, endCoord] };
         currentRouteGeometry = JSON.parse(JSON.stringify(fullNavRouteGeometry));
