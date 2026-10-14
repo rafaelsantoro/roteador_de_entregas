@@ -549,8 +549,7 @@ async function navigateToSearchLocation(lat, lng, name) {
                 'Content-Type': 'application/json'
             },
             body: JSON.stringify({ 
-                coordinates: [startCoord, endCoord],
-                radiuses: [-1, -1]
+                coordinates: [startCoord, endCoord]
             }),
             signal: controller.signal
         });
