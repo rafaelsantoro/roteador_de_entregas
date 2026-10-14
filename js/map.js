@@ -1,4 +1,4 @@
-/* --- MANIPULAÇÃO DO MAPA, GPS E NAVEGAÇÃO 3D (ANIMAÇÃO FLUÍDA 60FPS & BUSCA COM NÚMERO) --- */
+/* --- MANIPULAÇÃO DO MAPA, GPS, NAVEGAÇÃO 3D E BUSCA COM NÚMERO EXATO --- */
 
 // Variáveis Globais de Animação, Interpolação e Localização
 let navAnimFrame = null;
@@ -405,54 +405,83 @@ async function executeAddressSearch() {
     resultsContainer.innerHTML = '<p class="text-slate-400 text-[11px] p-1"><i class="fa-solid fa-spinner animate-spin mr-1"></i>Buscando endereço com número...</p>';
 
     const refCoords = lastGpsCoords || FIXED_PK2U;
-    let searchQuery = queryInput;
+    
+    // Remove a vírgula antes do número para não quebrar a análise predial
+    let cleanInput = queryInput.replace(/,\s*(\d+[a-zA-Z]?)/g, ' $1');
+    
     const cityState = await detectCurrentCityState();
+    let searchQuery = cleanInput;
 
     if (cityState) {
         const cityName = cityState.split(' - ')[0].toLowerCase();
-        if (!queryInput.toLowerCase().includes(cityName)) {
-            searchQuery = `${queryInput}, ${cityState}, Brasil`;
+        if (!cleanInput.toLowerCase().includes(cityName)) {
+            searchQuery = `${cleanInput}, ${cityState}`;
         }
     }
 
-    let url = `https://nominatim.openstreetmap.org/search?format=json&q=${encodeURIComponent(searchQuery)}&limit=7&countrycodes=br&addressdetails=1`;
+    let results = [];
 
-    if (refCoords) {
-        const delta = 0.3;
-        const viewbox = `${refCoords.lng - delta},${refCoords.lat + delta},${refCoords.lng + delta},${refCoords.lat - delta}`;
-        url += `&viewbox=${viewbox}&bounded=0`;
-    }
-
+    // 1. Busca Principal via OpenRouteService Geocoding (Pelias) - Alta precisão para números
     try {
-        let res = await fetch(url);
-        let data = await res.json();
-
-        if ((!data || data.length === 0) && searchQuery !== queryInput) {
-            const fallbackUrl = `https://nominatim.openstreetmap.org/search?format=json&q=${encodeURIComponent(queryInput)}&limit=7&countrycodes=br&addressdetails=1`;
-            res = await fetch(fallbackUrl);
-            data = await res.json();
+        const orsUrl = `https://api.openrouteservice.org/geocode/search?api_key=${ORS_API_KEY}&text=${encodeURIComponent(searchQuery)}&boundary.country=BRA&focus.point.lat=${refCoords.lat}&focus.point.lon=${refCoords.lng}&size=6`;
+        const orsRes = await fetch(orsUrl);
+        if (orsRes.ok) {
+            const orsData = await orsRes.json();
+            if (orsData && orsData.features && orsData.features.length > 0) {
+                results = orsData.features.map(feat => {
+                    const props = feat.properties || {};
+                    const coords = feat.geometry.coordinates;
+                    return {
+                        lat: coords[1],
+                        lng: coords[0],
+                        displayName: props.label || props.name || searchQuery,
+                        houseNumber: props.housenumber || ''
+                    };
+                });
+            }
         }
-
-        if (!data || data.length === 0) {
-            resultsContainer.innerHTML = '<p class="text-rose-400 text-[11px] p-1">Nenhum endereço encontrado.</p>';
-            return;
-        }
-
-        resultsContainer.innerHTML = '';
-        data.forEach(item => {
-            const btn = document.createElement('button');
-            btn.className = 'w-full text-left p-2 hover:bg-slate-800 rounded-lg text-[11px] text-slate-200 truncate border-b border-slate-800/60 flex items-center space-x-2';
-            
-            const houseNum = item.address && item.address.house_number ? ` (Nº ${item.address.house_number})` : '';
-            const displayName = item.display_name;
-
-            btn.innerHTML = `<i class="fa-solid fa-location-dot text-amber-400 shrink-0"></i><span class="truncate"><strong>${displayName.split(',')[0]}${houseNum}</strong> - ${displayName}</span>`;
-            btn.onclick = () => selectSearchResult(parseFloat(item.lat), parseFloat(item.lon), displayName);
-            resultsContainer.appendChild(btn);
-        });
-    } catch(err) {
-        resultsContainer.innerHTML = '<p class="text-rose-400 text-[11px] p-1">Erro ao pesquisar endereço.</p>';
+    } catch (e) {
+        console.warn("Erro ao buscar via ORS Geocoding, acionando fallback...", e);
     }
+
+    // 2. Fallback via Nominatim caso a API principal não traga resultados
+    if (results.length === 0) {
+        try {
+            let nomUrl = `https://nominatim.openstreetmap.org/search?format=json&q=${encodeURIComponent(searchQuery)}&limit=7&countrycodes=br&addressdetails=1`;
+            if (refCoords) {
+                const delta = 0.3;
+                const viewbox = `${refCoords.lng - delta},${refCoords.lat + delta},${refCoords.lng + delta},${refCoords.lat - delta}`;
+                nomUrl += `&viewbox=${viewbox}&bounded=0`;
+            }
+            const nomRes = await fetch(nomUrl);
+            const nomData = await nomRes.json();
+
+            if (nomData && nomData.length > 0) {
+                results = nomData.map(item => ({
+                    lat: parseFloat(item.lat),
+                    lng: parseFloat(item.lon),
+                    displayName: item.display_name,
+                    houseNumber: (item.address && item.address.house_number) ? item.address.house_number : ''
+                }));
+            }
+        } catch (e) {}
+    }
+
+    if (results.length === 0) {
+        resultsContainer.innerHTML = '<p class="text-rose-400 text-[11px] p-1">Nenhum endereço ou número encontrado.</p>';
+        return;
+    }
+
+    resultsContainer.innerHTML = '';
+    results.forEach(item => {
+        const btn = document.createElement('button');
+        btn.className = 'w-full text-left p-2 hover:bg-slate-800 rounded-lg text-[11px] text-slate-200 truncate border-b border-slate-800/60 flex items-center space-x-2';
+        
+        const badge = item.houseNumber ? `<span class="bg-amber-400 text-slate-950 font-extrabold text-[9px] px-1.5 py-0.5 rounded mr-1">Nº ${item.houseNumber}</span>` : '';
+        btn.innerHTML = `<i class="fa-solid fa-location-dot text-amber-400 shrink-0"></i><span class="truncate">${badge}${item.displayName}</span>`;
+        btn.onclick = () => selectSearchResult(item.lat, item.lng, item.displayName);
+        resultsContainer.appendChild(btn);
+    });
 }
 
 function selectSearchResult(lat, lng, name) {
@@ -486,7 +515,7 @@ function selectSearchResult(lat, lng, name) {
 
     if (window.innerWidth < 768) switchMobileTab('map');
 
-    map.flyTo({ center: [lng, lat], zoom: 16.5 });
+    map.flyTo({ center: [lng, lat], zoom: 18 });
     searchMarker.togglePopup();
 }
 
