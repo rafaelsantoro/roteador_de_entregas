@@ -195,51 +195,55 @@
         <main id="map-panel" class="flex-1 w-full h-full relative hidden md:block">
             <div id="map"></div>
 
-            <!-- Painel Superior de Orientação do Modo Navegação -->
-            <div id="nav-header-panel" class="hidden absolute top-3 left-3 right-3 sm:right-4 z-30 bg-slate-900/95 text-white p-3 rounded-2xl shadow-2xl border border-slate-700 backdrop-blur-md">
-                <div class="flex items-center justify-between">
-                    <div class="flex-1 min-w-0 mr-2">
-                        <div class="flex items-center space-x-2 min-w-0 mb-1">
-                            <div class="w-7 h-7 rounded-full bg-amber-400 text-slate-950 font-extrabold text-xs flex items-center justify-center shrink-0 shadow">
-                                <span id="nav-next-num">#</span>
-                            </div>
-                            <div class="min-w-0 flex items-center space-x-1.5 truncate">
-                                <span id="nav-next-label" class="text-[10px] uppercase font-bold text-amber-400 tracking-wider shrink-0">Próximo Destino</span>
-                                <span class="text-slate-500 text-xs shrink-0">•</span>
-                                <h3 id="nav-next-title" class="text-xs sm:text-sm font-bold truncate text-amber-300">Carregando...</h3>
-                            </div>
-                        </div>
-
-                        <p id="nav-next-address" class="text-base sm:text-lg text-slate-100 font-bold break-words leading-tight mt-0.5">Aguardando rota...</p>
-                    </div>
-
-                    <!-- Botões de Ação para Entregas de Pacotes -->
-                    <div id="nav-delivery-actions" class="flex flex-col items-center shrink-0 ml-1 space-y-1">
-                        <button onclick="skipCurrentDelivery()" title="Pular Entrega (Voltar depois)" class="w-full h-7 bg-amber-500 hover:bg-amber-400 text-slate-950 rounded-lg flex items-center justify-center text-xs shadow font-bold">
-                            <i class="fa-solid fa-forward-step"></i>
-                        </button>
-
-                        <div class="flex items-center space-x-1">
-                            <button onclick="setDeliveryStatus(currentNavIndex, 'success')" title="Concluir Entrega" class="w-8 h-8 bg-emerald-600 hover:bg-emerald-500 text-white rounded-xl flex items-center justify-center text-xs shadow font-bold">
-                                <i class="fa-solid fa-check"></i>
-                            </button>
-                            <button onclick="setDeliveryStatus(currentNavIndex, 'occurrence')" title="Ocorrência" class="w-8 h-8 bg-rose-600 hover:bg-rose-500 text-white rounded-xl flex items-center justify-center text-xs shadow font-bold">
-                                <i class="fa-solid fa-xmark"></i>
-                            </button>
-                        </div>
-
-                        <span id="nav-next-house-num" class="hidden text-[10px] font-bold text-amber-300 tracking-tight whitespace-nowrap leading-none mt-0.5"></span>
-                    </div>
-
-                    <!-- Botão de Ação para Endereço Pesquisado Personalizado -->
-                    <div id="nav-custom-search-actions" class="hidden flex items-center shrink-0 ml-2">
-                        <button onclick="cancelCustomSearchRoute()" class="bg-rose-600 hover:bg-rose-700 text-white text-xs font-bold py-1.5 px-2.5 rounded-xl shadow transition flex items-center space-x-1.5">
-                            <i class="fa-solid fa-ban text-xs"></i>
-                            <span>Cancelar Trajeto</span>
-                        </button>
-                    </div>
-                </div>
-            </div>
+			<!-- Painel Superior de Orientação do Modo Navegação -->
+			<div id="nav-header-panel" class="hidden absolute top-3 left-3 right-3 sm:right-4 z-30 bg-slate-900/95 text-white p-3 rounded-2xl shadow-2xl border border-slate-700 backdrop-blur-md">
+			    <div class="flex items-center justify-between">
+			        <div class="flex-1 min-w-0 mr-2">
+			            <div class="flex items-start space-x-2.5 min-w-0 mb-1">
+			                <!-- Círculo do Número da Entrega (+40% maior) -->
+			                <div class="w-[39px] h-[39px] rounded-full bg-amber-400 text-slate-950 font-black text-[17px] flex items-center justify-center shrink-0 shadow mt-0.5">
+			                    <span id="nav-next-num">#</span>
+			                </div>
+			                
+			                <!-- Texto "Próximo Destino" e Código BRXXXXXXXXX em baixo -->
+			                <div class="min-w-0 flex flex-col">
+			                    <p id="nav-next-label" class="text-[10px] uppercase font-bold text-amber-400 tracking-wider">Próximo Destino</p>
+			                    <h3 id="nav-next-title" class="text-xs sm:text-sm font-bold truncate text-amber-300">Carregando...</h3>
+			                </div>
+			            </div>
+			
+			            <p id="nav-next-address" class="text-base sm:text-lg text-slate-100 font-bold break-words leading-tight mt-0.5">Aguardando rota...</p>
+			        </div>
+			
+			        <!-- Botões de Ação para Entregas de Pacotes (+30% maiores) -->
+			        <div id="nav-delivery-actions" class="flex flex-col items-center shrink-0 ml-1 space-y-1">
+			            <button onclick="skipCurrentDelivery()" title="Pular Entrega (Voltar depois)" class="w-full h-7 bg-amber-500 hover:bg-amber-400 text-slate-950 rounded-lg flex items-center justify-center text-xs shadow font-bold">
+			                <i class="fa-solid fa-forward-step"></i>
+			            </button>
+			
+			            <div class="flex items-center space-x-1.5">
+			                <!-- Botão Sucesso (+30%: 42px x 42px) -->
+			                <button onclick="setDeliveryStatus(currentNavIndex, 'success')" title="Concluir Entrega" class="w-[42px] h-[42px] bg-emerald-600 hover:bg-emerald-500 text-white rounded-xl flex items-center justify-center text-base shadow font-bold transition-transform active:scale-95">
+			                    <i class="fa-solid fa-check"></i>
+			                </button>
+			                <!-- Botão Ocorrência (+30%: 42px x 42px) -->
+			                <button onclick="setDeliveryStatus(currentNavIndex, 'occurrence')" title="Ocorrência" class="w-[42px] h-[42px] bg-rose-600 hover:bg-rose-500 text-white rounded-xl flex items-center justify-center text-base shadow font-bold transition-transform active:scale-95">
+			                    <i class="fa-solid fa-xmark"></i>
+			                </button>
+			            </div>
+			
+			            <span id="nav-next-house-num" class="hidden text-[10px] font-bold text-amber-300 tracking-tight whitespace-nowrap leading-none mt-0.5"></span>
+			        </div>
+			
+			        <!-- Botão de Ação para Endereço Pesquisado Personalizado -->
+			        <div id="nav-custom-search-actions" class="hidden flex items-center shrink-0 ml-2">
+			            <button onclick="cancelCustomSearchRoute()" class="bg-rose-600 hover:bg-rose-700 text-white text-xs font-bold py-1.5 px-2.5 rounded-xl shadow transition flex items-center space-x-1.5">
+			                <i class="fa-solid fa-ban text-xs"></i>
+			                <span>Cancelar Trajeto</span>
+			            </button>
+			        </div>
+			    </div>
+			</div>
 
             <!-- Modal/Box de Pesquisa de Endereço -->
             <div id="search-box-panel" class="hidden absolute top-3 left-3 right-16 z-40 bg-slate-900/95 text-white p-3 rounded-2xl shadow-2xl border border-slate-700 backdrop-blur-md space-y-2">
