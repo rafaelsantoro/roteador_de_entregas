@@ -845,3 +845,82 @@ function focusOnPoint(idx) {
     const marker = markersMap.get(idx);
     if (marker) marker.togglePopup();
 }
+
+
+/* --- PRÉ-CARREGAMENTO DA ÁREA URBANA DE AVARÉ (OFFLINE) --- */
+
+// Limites Geográficos (Bounding Box) da Área Urbana de Avaré - SP
+const AVARE_URBAN_BBOX = {
+    southLat: -23.135, // Limite Sul (Entrada de Cerqueira César / SP-255)
+    northLat: -23.070, // Limite Norte (Bairro Brabância / Distrito Industrial)
+    westLng:  -48.965, // Limite Oeste (Camargo)
+    eastLng:  -48.885  // Limite Leste (Planalto)
+};
+
+function lng2tile(lon, zoom) {
+    return Math.floor((lon + 180) / 360 * Math.pow(2, zoom));
+}
+
+function lat2tile(lat, zoom) {
+    return Math.floor((1 - Math.log(Math.tan(lat * Math.PI / 180) + 1 / Math.cos(lat * Math.PI / 180)) / Math.PI) / 2 * Math.pow(2, zoom));
+}
+
+async function downloadAvareUrbanMap(minZoom = 14, maxZoom = 17) {
+    if (!navigator.onLine) {
+        alert("Necessita de estar ligado à internet para descarregar o mapa offline.");
+        return;
+    }
+
+    const subdomains = ['a', 'b', 'c'];
+    const urlsToFetch = new Set();
+
+    // Calcula os tiles necessários para cada nível de zoom dentro do quadrado urbano
+    for (let z = minZoom; z <= maxZoom; z++) {
+        const xMin = lng2tile(AVARE_URBAN_BBOX.westLng, z);
+        const xMax = lng2tile(AVARE_URBAN_BBOX.eastLng, z);
+        
+        // No sistema Web Mercator, a latitude Norte gera um Y menor que a latitude Sul
+        const yMin = lat2tile(AVARE_URBAN_BBOX.northLat, z);
+        const yMax = lat2tile(AVARE_URBAN_BBOX.southLat, z);
+
+        for (let x = xMin; x <= xMax; x++) {
+            for (let y = yMin; y <= yMax; y++) {
+                const sub = subdomains[Math.abs(x + y) % 3];
+                urlsToFetch.add(`https://${sub}.tile.openstreetmap.org/${z}/${x}/${y}.png`);
+            }
+        }
+    }
+
+    const totalTiles = urlsToFetch.size;
+    showLoading(`A descarregar Avaré Offline (0/${totalTiles} imagens)...`);
+
+    try {
+        const cache = await caches.open('map-tiles-cache');
+        const urlArray = Array.from(urlsToFetch);
+        let downloaded = 0;
+
+        // Processa em pequenos lotes de 10 para transferência rápida sem travar a rede
+        for (let i = 0; i < urlArray.length; i += 10) {
+            const batch = urlArray.slice(i, i + 10);
+            await Promise.all(batch.map(async (url) => {
+                const match = await cache.match(url);
+                if (!match) {
+                    try {
+                        const res = await fetch(url);
+                        if (res.ok) await cache.put(url, res);
+                    } catch (e) {}
+                }
+            }));
+            
+            downloaded += batch.length;
+            showLoading(`A descarregar Avaré Offline (${Math.min(downloaded, totalTiles)}/${totalTiles})...`);
+        }
+
+        alert(`Download concluído! A área urbana de Avaré (${totalTiles} blocos) está salva e pronta para uso sem internet.`);
+    } catch (e) {
+        console.error("Erro ao guardar mapa offline de Avaré:", e);
+        alert("Ocorreu uma falha ao guardar o mapa offline.");
+    } finally {
+        hideLoading();
+    }
+}
