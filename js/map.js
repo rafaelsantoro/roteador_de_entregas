@@ -924,3 +924,116 @@ async function downloadAvareUrbanMap(minZoom = 14, maxZoom = 17) {
         hideLoading();
     }
 }
+
+
+/* --- SIMULADOR DE NAVEGAÇÃO (TESTE VISUAL PONTO A -> PONTO B) --- */
+/* Para iniciar aperte F12 e em seguida digite: runDemoNavigation(); */
+/* Para parar: stopDemoNavigation(); */
+
+
+let demoIntervalId = null;
+
+async function runDemoNavigation() {
+    // Para qualquer simulação em andamento
+    stopDemoNavigation();
+
+    // Coordenadas de teste em Avaré - SP
+    // Ponto A: Centro / Largo São João
+    const pointA = { lat: -23.1025, lng: -48.9555 }; 
+    // Ponto B: Avenida Paranapanema
+    const pointB = { lat: -23.1130, lng: -48.9280 }; 
+
+    showLoading("A gerar rota de teste Avaré...");
+
+    try {
+        // 1. Busca rota real entre o Ponto A e Ponto B no OpenRouteService
+        const response = await fetch('https://api.openrouteservice.org/v2/directions/driving-car/geojson', {
+            method: 'POST',
+            headers: {
+                'Authorization': ORS_API_KEY,
+                'Content-Type': 'application/json'
+            },
+            body: JSON.stringify({
+                coordinates: [
+                    [pointA.lng, pointA.lat],
+                    [pointB.lng, pointB.lat]
+                ]
+            })
+        });
+
+        hideLoading();
+
+        if (!response.ok) {
+            alert("Erro ao obter rota da API ORS. Verifique a chave de API.");
+            return;
+        }
+
+        const data = await response.json();
+        const coords = data.features[0].geometry.coordinates; // Array de [lng, lat]
+
+        if (!coords || coords.length < 2) {
+            alert("Rota não encontrada.");
+            return;
+        }
+
+        // 2. Ativa Modos de Navegação e 3D
+        isNavMode = true;
+        if (!is3DMode) toggle3DMode();
+
+        document.getElementById('nav-header-panel')?.classList.remove('hidden');
+        document.getElementById('nav-next-label').textContent = 'Simulação de Teste';
+        document.getElementById('nav-next-title').textContent = 'Ponto A → Ponto B';
+        document.getElementById('nav-next-address').textContent = 'Av. Paranapanema - Avaré';
+
+        // Configura as geometrias globais da rota
+        fullNavRouteGeometry = { 'type': 'LineString', 'coordinates': coords };
+        currentRouteGeometry = JSON.parse(JSON.stringify(fullNavRouteGeometry));
+        updateRouteOnMap();
+
+        // 3. Inicia loop de simulação de movimento do veículo a cada 1.2s
+        let stepIndex = 0;
+
+        demoIntervalId = setInterval(() => {
+            if (stepIndex >= coords.length) {
+                stopDemoNavigation();
+                alert("Simulação concluída! Chegou ao destino (Ponto B).");
+                return;
+            }
+
+            const currentCoord = coords[stepIndex];
+            const nextCoord = coords[Math.min(stepIndex + 1, coords.length - 1)];
+
+            // Calcula a direção em graus (heading) para a próxima curva
+            const heading = calculateBearing(
+                currentCoord[1], currentCoord[0],
+                nextCoord[1], nextCoord[0]
+            );
+
+            // Injeta posição simulada na função real do GPS
+            onGpsSuccess({
+                coords: {
+                    latitude: currentCoord[1],
+                    longitude: currentCoord[0],
+                    heading: heading,
+                    speed: 10 // ~36 km/h
+                }
+            });
+
+            stepIndex++;
+        }, 1200);
+
+    } catch (err) {
+        hideLoading();
+        console.error("Erro na simulação:", err);
+        alert("Falha ao iniciar simulação de navegação.");
+    }
+}
+
+function stopDemoNavigation() {
+    if (demoIntervalId !== null) {
+        clearInterval(demoIntervalId);
+        demoIntervalId = null;
+    }
+    isNavMode = false;
+    document.getElementById('nav-header-panel')?.classList.add('hidden');
+}
