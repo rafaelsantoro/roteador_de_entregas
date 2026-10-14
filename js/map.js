@@ -1,4 +1,4 @@
-/* --- MANIPULAÇÃO DO MAPA, GPS, NAVEGAÇÃO 3D E BUSCA COM NÚMERO EXATO --- */
+/* --- MANIPULAÇÃO DO MAPA ESCURO, GPS, NAVEGAÇÃO 3D E BUSCA OSM (NOMINATIM) --- */
 
 // Variáveis Globais de Animação, Interpolação e Localização
 let navAnimFrame = null;
@@ -70,10 +70,10 @@ function enable3DBuildings() {
                 'type': 'fill-extrusion',
                 'minzoom': 14,
                 'paint': {
-                    'fill-extrusion-color': '#cbd5e1',
+                    'fill-extrusion-color': '#334155', // Tom escuro para prédios 3D
                     'fill-extrusion-height': ['coalesce', ['get', 'render_height'], ['get', 'height'], 12],
                     'fill-extrusion-base': ['coalesce', ['get', 'render_min_height'], ['get', 'min_height'], 0],
-                    'fill-extrusion-opacity': 0.65
+                    'fill-extrusion-opacity': 0.75
                 }
             }, labelLayerId);
         }
@@ -346,7 +346,7 @@ function onGpsError(err) {
     toggleGPS();
 }
 
-/* --- DETECÇÃO DO MUNICÍPIO E ESTADO VIA GPS --- */
+/* --- DETECÇÃO DE MUNICÍPIO E ESTADO VIA GPS --- */
 
 async function detectCurrentCityState() {
     if (cachedCityState) return cachedCityState;
@@ -397,115 +397,63 @@ async function toggleSearchBox(forceOpen) {
     }
 }
 
+/* --- BUSCA EXCLUSIVA OPENSTREETMAP (NOMINATIM) --- */
+
 async function executeAddressSearch() {
     const queryInput = document.getElementById('search-address-input').value.trim();
     const resultsContainer = document.getElementById('search-results-list');
     if (!queryInput) return;
 
-    resultsContainer.innerHTML = '<p class="text-slate-400 text-[11px] p-1"><i class="fa-solid fa-spinner animate-spin mr-1"></i>Buscando número exato da casa...</p>';
+    resultsContainer.innerHTML = '<p class="text-slate-400 text-[11px] p-1"><i class="fa-solid fa-spinner animate-spin mr-1"></i>Buscando no OpenStreetMap...</p>';
 
     const refCoords = lastGpsCoords || FIXED_PK2U;
-    
-    // Extrai o número digitado pelo utilizador (ex: "1000" de "avenida paranapanema 1000")
-    const extractedNumMatch = queryInput.match(/\b\d+[a-zA-Z]?\b/);
-    const userNumber = extractedNumMatch ? extractedNumMatch[0] : null;
-
-    // Normaliza entrada removendo vírgulas desnecessárias antes de números
-    let cleanInput = queryInput.replace(/,\s*(\d+[a-zA-Z]?)/g, ' $1');
-    
     const cityState = await detectCurrentCityState();
-    let searchQuery = cleanInput;
+    let searchQuery = queryInput;
 
     if (cityState) {
         const cityName = cityState.split(' - ')[0].toLowerCase();
-        if (!cleanInput.toLowerCase().includes(cityName)) {
-            searchQuery = `${cleanInput}, ${cityState}`;
+        if (!queryInput.toLowerCase().includes(cityName)) {
+            searchQuery = `${queryInput}, ${cityState}, Brasil`;
         }
     }
 
-    let results = [];
-
-    // 1. Busca Principal via ESRI ArcGIS Geocoding (Excelente para interpolação predial e números no Brasil)
     try {
-        const esriUrl = `https://geocode.arcgis.com/arcgis/rest/services/World/GeocodeServer/findAddressCandidates?f=json&singleLine=${encodeURIComponent(searchQuery)}&maxLocations=6&outFields=Match_addr,Addr_type,StAddr,City`;
-        const esriRes = await fetch(esriUrl);
-        if (esriRes.ok) {
-            const esriData = await esriRes.json();
-            if (esriData && esriData.candidates && esriData.candidates.length > 0) {
-                results = esriData.candidates.map(cand => {
-                    const addr = cand.address || (cand.attributes ? cand.attributes.Match_addr : searchQuery);
-                    
-                    let hasNum = userNumber && (addr.includes(` ${userNumber}`) || addr.includes(`, ${userNumber}`));
-                    let displayTitle = addr;
-
-                    if (userNumber && !hasNum) {
-                        const parts = addr.split(',');
-                        parts[0] = `${parts[0].trim()} nº ${userNumber}`;
-                        displayTitle = parts.join(',');
-                    }
-
-                    return {
-                        lat: cand.location.y,
-                        lng: cand.location.x,
-                        displayName: displayTitle,
-                        houseNumber: userNumber || ''
-                    };
-                });
-            }
+        let url = `https://nominatim.openstreetmap.org/search?format=json&q=${encodeURIComponent(searchQuery)}&limit=7&countrycodes=br&addressdetails=1`;
+        if (refCoords) {
+            const delta = 0.3;
+            const viewbox = `${refCoords.lng - delta},${refCoords.lat + delta},${refCoords.lng + delta},${refCoords.lat - delta}`;
+            url += `&viewbox=${viewbox}&bounded=0`;
         }
-    } catch (e) {
-        console.warn("Erro no ESRI Geocoding, a acionar fallback...", e);
+
+        let res = await fetch(url);
+        let data = await res.json();
+
+        if ((!data || data.length === 0) && searchQuery !== queryInput) {
+            const fallbackUrl = `https://nominatim.openstreetmap.org/search?format=json&q=${encodeURIComponent(queryInput)}&limit=7&countrycodes=br&addressdetails=1`;
+            res = await fetch(fallbackUrl);
+            data = await res.json();
+        }
+
+        if (!data || data.length === 0) {
+            resultsContainer.innerHTML = '<p class="text-rose-400 text-[11px] p-1">Nenhum endereço encontrado.</p>';
+            return;
+        }
+
+        resultsContainer.innerHTML = '';
+        data.forEach(item => {
+            const btn = document.createElement('button');
+            btn.className = 'w-full text-left p-2 hover:bg-slate-800 rounded-lg text-[11px] text-slate-200 truncate border-b border-slate-800/60 flex items-center space-x-2';
+            
+            const houseNum = item.address && item.address.house_number ? ` (Nº ${item.address.house_number})` : '';
+            const mainTitle = item.display_name.split(',')[0];
+
+            btn.innerHTML = `<i class="fa-solid fa-location-dot text-amber-400 shrink-0"></i><span class="truncate"><strong>${mainTitle}${houseNum}</strong> - ${item.display_name}</span>`;
+            btn.onclick = () => selectSearchResult(parseFloat(item.lat), parseFloat(item.lon), item.display_name);
+            resultsContainer.appendChild(btn);
+        });
+    } catch(err) {
+        resultsContainer.innerHTML = '<p class="text-rose-400 text-[11px] p-1">Erro ao pesquisar endereço no OSM.</p>';
     }
-
-    // 2. Fallback via Nominatim caso o ESRI não retorne resultados
-    if (results.length === 0) {
-        try {
-            let nomUrl = `https://nominatim.openstreetmap.org/search?format=json&q=${encodeURIComponent(searchQuery)}&limit=7&countrycodes=br&addressdetails=1`;
-            if (refCoords) {
-                const delta = 0.3;
-                const viewbox = `${refCoords.lng - delta},${refCoords.lat + delta},${refCoords.lng + delta},${refCoords.lat - delta}`;
-                nomUrl += `&viewbox=${viewbox}&bounded=0`;
-            }
-            const nomRes = await fetch(nomUrl);
-            const nomData = await nomRes.json();
-
-            if (nomData && nomData.length > 0) {
-                results = nomData.map(item => {
-                    let num = (item.address && item.address.house_number) ? item.address.house_number : userNumber;
-                    let addrStr = item.display_name;
-
-                    if (userNumber && !addrStr.includes(userNumber)) {
-                        const parts = addrStr.split(',');
-                        parts[0] = `${parts[0].trim()} nº ${userNumber}`;
-                        addrStr = parts.join(',');
-                    }
-
-                    return {
-                        lat: parseFloat(item.lat),
-                        lng: parseFloat(item.lon),
-                        displayName: addrStr,
-                        houseNumber: num || ''
-                    };
-                });
-            }
-        } catch (e) {}
-    }
-
-    if (results.length === 0) {
-        resultsContainer.innerHTML = '<p class="text-rose-400 text-[11px] p-1">Nenhum endereço encontrado.</p>';
-        return;
-    }
-
-    resultsContainer.innerHTML = '';
-    results.forEach(item => {
-        const btn = document.createElement('button');
-        btn.className = 'w-full text-left p-2 hover:bg-slate-800 rounded-lg text-[11px] text-slate-200 truncate border-b border-slate-800/60 flex items-center space-x-2';
-        
-        const badge = item.houseNumber ? `<span class="bg-amber-400 text-slate-950 font-extrabold text-[9px] px-1.5 py-0.5 rounded mr-1">Nº ${item.houseNumber}</span>` : '';
-        btn.innerHTML = `<i class="fa-solid fa-location-dot text-amber-400 shrink-0"></i><span class="truncate">${badge}${item.displayName}</span>`;
-        btn.onclick = () => selectSearchResult(item.lat, item.lng, item.displayName);
-        resultsContainer.appendChild(btn);
-    });
 }
 
 function selectSearchResult(lat, lng, name) {
@@ -539,7 +487,7 @@ function selectSearchResult(lat, lng, name) {
 
     if (window.innerWidth < 768) switchMobileTab('map');
 
-    map.flyTo({ center: [lng, lat], zoom: 18 });
+    map.flyTo({ center: [lng, lat], zoom: 17 });
     searchMarker.togglePopup();
 }
 
