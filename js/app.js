@@ -127,7 +127,7 @@ document.addEventListener('DOMContentLoaded', () => {
 
     map = new maplibregl.Map({
         container: 'map',
-        style: LIGHT_THEME_URL,
+        style: 'https://basemaps.cartocdn.com/gl/voyager-gl-style/style.json',
         center: [-48.945, -23.107],
         zoom: 13,
         pixelRatio: window.devicePixelRatio || 2
