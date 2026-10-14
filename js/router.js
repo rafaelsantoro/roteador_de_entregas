@@ -417,8 +417,7 @@ async function fetchDeliveryPolyline(orderedDeliveries) {
                     'Content-Type': 'application/json'
                 },
                 body: JSON.stringify({ 
-                    coordinates: chunk,
-                    radiuses: Array(chunk.length).fill(-1)
+                    coordinates: chunk
                 }),
                 signal: controller.signal
             }).then(res => {
@@ -490,8 +489,7 @@ async function fetchFullDayTotalDistance(orderedDeliveries) {
                     'Content-Type': 'application/json'
                 },
                 body: JSON.stringify({ 
-                    coordinates: chunk,
-                    radiuses: Array(chunk.length).fill(-1)
+                    coordinates: chunk
                 }),
                 signal: controller.signal
             }).then(res => {
@@ -585,19 +583,21 @@ async function updateNavSegmentRoute(forceIdx = null) {
     }
 
     let startCoord;
-        if (lastGpsCoords) {
-            startCoord = [lastGpsCoords.lng, lastGpsCoords.lat];
-            isFallbackOrigin = false;
-        } else {
-            startCoord = (nextIdx > 0 ? [activePoints[nextIdx - 1].lng, activePoints[nextIdx - 1].lat] : [FIXED_PK2U.lng, FIXED_PK2U.lat]);
-            isFallbackOrigin = true; // Sinaliza que precisa de recálculo imediato assim que o GPS fixar
-        }
+    if (lastGpsCoords) {
+        startCoord = [lastGpsCoords.lng, lastGpsCoords.lat];
+        isFallbackOrigin = false;
+    } else {
+        startCoord = (nextIdx > 0 ? [activePoints[nextIdx - 1].lng, activePoints[nextIdx - 1].lat] : [FIXED_PK2U.lng, FIXED_PK2U.lat]);
+        isFallbackOrigin = true;
+    }
 
     const endCoord = [targetPoint.lng, targetPoint.lat];
+    let routeFound = false;
 
+    // 1. Tenta via OpenRouteService (sem o parâmetro radiuses que causava o erro 400)
     try {
         const controller = new AbortController();
-        const timeoutId = setTimeout(() => controller.abort(), 10000);
+        const timeoutId = setTimeout(() => controller.abort(), 6000);
 
         const response = await fetch('https://api.openrouteservice.org/v2/directions/driving-car/geojson', {
             method: 'POST',
@@ -606,8 +606,7 @@ async function updateNavSegmentRoute(forceIdx = null) {
                 'Content-Type': 'application/json'
             },
             body: JSON.stringify({ 
-                coordinates: [startCoord, endCoord],
-                radiuses: [-1, -1]
+                coordinates: [startCoord, endCoord]
             }),
             signal: controller.signal
         });
@@ -618,15 +617,29 @@ async function updateNavSegmentRoute(forceIdx = null) {
             if (data && data.features && data.features[0] && data.features[0].geometry) {
                 fullNavRouteGeometry = data.features[0].geometry;
                 currentRouteGeometry = JSON.parse(JSON.stringify(fullNavRouteGeometry));
-            } else {
-                fullNavRouteGeometry = { 'type': 'LineString', 'coordinates': [startCoord, endCoord] };
-                currentRouteGeometry = JSON.parse(JSON.stringify(fullNavRouteGeometry));
+                routeFound = true;
             }
-        } else {
-            fullNavRouteGeometry = { 'type': 'LineString', 'coordinates': [startCoord, endCoord] };
-            currentRouteGeometry = JSON.parse(JSON.stringify(fullNavRouteGeometry));
         }
-    } catch (err) {
+    } catch (err) {}
+
+    // 2. Fallback via OSRM público (caso exceda o limite de requisições por minuto do ORS)
+    if (!routeFound) {
+        try {
+            const osrmUrl = `https://router.project-osrm.org/route/v1/driving/${startCoord[0]},${startCoord[1]};${endCoord[0]},${endCoord[1]}?overview=full&geometries=geojson`;
+            const osrmRes = await fetch(osrmUrl);
+            if (osrmRes.ok) {
+                const osrmData = await osrmRes.json();
+                if (osrmData && osrmData.routes && osrmData.routes[0] && osrmData.routes[0].geometry) {
+                    fullNavRouteGeometry = osrmData.routes[0].geometry;
+                    currentRouteGeometry = JSON.parse(JSON.stringify(fullNavRouteGeometry));
+                    routeFound = true;
+                }
+            }
+        } catch (e) {}
+    }
+
+    // 3. Linha reta como último recurso (apenas sem internet)
+    if (!routeFound) {
         fullNavRouteGeometry = { 'type': 'LineString', 'coordinates': [startCoord, endCoord] };
         currentRouteGeometry = JSON.parse(JSON.stringify(fullNavRouteGeometry));
     }
