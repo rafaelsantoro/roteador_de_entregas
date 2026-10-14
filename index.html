@@ -245,15 +245,16 @@
 			    </div>
 			</div>
 
-            <!-- Modal/Box de Pesquisa de Endereço -->
+			<!-- Modal/Box de Pesquisa de Endereço -->
             <div id="search-box-panel" class="hidden absolute top-3 left-3 right-16 z-40 bg-slate-900/95 text-white p-3 rounded-2xl shadow-2xl border border-slate-700 backdrop-blur-md space-y-2">
                 <div class="flex items-center space-x-2">
-                    <input type="text" id="search-address-input" onkeydown="if(event.key==='Enter') executeAddressSearch()" placeholder="Digite um endereço, rua ou local..." class="flex-1 bg-slate-800 border border-slate-700 text-white text-xs rounded-xl p-2 focus:ring-2 focus:ring-amber-400 outline-none">
+                    <input type="text" id="search-address-input" onkeydown="if(event.key==='Enter') executeAddressSearch()" placeholder="Digite a rua e o número (ex: Rua Flores, 123)..." class="flex-1 bg-slate-800 border border-slate-700 text-white text-xs rounded-xl p-2 focus:ring-2 focus:ring-amber-400 outline-none">
                     <button onclick="executeAddressSearch()" class="bg-amber-400 hover:bg-amber-500 text-slate-950 font-bold text-xs px-3 py-2 rounded-xl transition">
                         <i class="fa-solid fa-search"></i>
                     </button>
                     <button onclick="toggleSearchBox(false)" class="text-slate-400 hover:text-white text-xs px-1 font-bold">✕</button>
                 </div>
+                <div id="search-city-hint" class="text-[10px] text-amber-300 font-semibold px-1 hidden"></div>
                 <div id="search-results-list" class="max-h-40 overflow-y-auto space-y-1 text-xs custom-scroll"></div>
             </div>
 
