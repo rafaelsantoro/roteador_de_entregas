@@ -128,10 +128,9 @@ function haversine(p1, p2) {
 
 /* --- MATRIZ DE DISTÂNCIAS E OTIMIZAÇÃO PARA QUALQUER NÚMERO DE PONTOS (>50) --- */
 
-// Solicita a matriz ORS para um lote de até 50 coordenadas
 async function fetchDistanceMatrixChunk(locations) {
     if (!navigator.onLine || !locations || locations.length < 2) return null;
-    if (locations.length > 50) return null; // Respeita o limite da API gratuita do ORS
+    if (locations.length > 50) return null;
 
     const coords = locations.map(p => [p.lng, p.lat]);
 
@@ -163,7 +162,6 @@ async function fetchDistanceMatrixChunk(locations) {
     }
 }
 
-// Agrupa os pontos em clusters geográficos por proximidade (máx. 40 pontos por lote)
 function createSpatialClusters(deliveries, maxClusterSize = 40) {
     let unvisited = [...deliveries];
     const clusters = [];
@@ -208,7 +206,6 @@ function createSpatialClusters(deliveries, maxClusterSize = 40) {
     return clusters;
 }
 
-// Otimiza um lote individual com a sua própria Matriz Real + refinamento 2-opt
 async function optimizeSingleCluster(clusterPoints, startOrigin, endDestination, prioritizeSameStreet, manualFirstIdx = -1) {
     if (!clusterPoints || clusterPoints.length === 0) return [];
     if (clusterPoints.length === 1) return [...clusterPoints];
@@ -305,8 +302,6 @@ async function optimizeSingleCluster(clusterPoints, startOrigin, endDestination,
 
     return route.map(({ matrixIdx, ...rest }) => rest);
 }
-
-/* --- SOLVER PRINCIPAL (SUPORTA QUALQUER QUANTIDADE DE DESTINOS) --- */
 
 async function solveDeliveriesTSP(deliveries, manualFirstIdx, prioritizeSameStreet) {
     if (!deliveries || deliveries.length === 0) return [];
@@ -421,7 +416,10 @@ async function fetchDeliveryPolyline(orderedDeliveries) {
                     'Authorization': ORS_API_KEY,
                     'Content-Type': 'application/json'
                 },
-                body: JSON.stringify({ coordinates: chunk }),
+                body: JSON.stringify({ 
+                    coordinates: chunk,
+                    radiuses: Array(chunk.length).fill(-1)
+                }),
                 signal: controller.signal
             }).then(res => {
                 clearTimeout(timeoutId);
@@ -491,7 +489,10 @@ async function fetchFullDayTotalDistance(orderedDeliveries) {
                     'Authorization': ORS_API_KEY,
                     'Content-Type': 'application/json'
                 },
-                body: JSON.stringify({ coordinates: chunk }),
+                body: JSON.stringify({ 
+                    coordinates: chunk,
+                    radiuses: Array(chunk.length).fill(-1)
+                }),
                 signal: controller.signal
             }).then(res => {
                 clearTimeout(timeoutId);
@@ -599,7 +600,10 @@ async function updateNavSegmentRoute(forceIdx = null) {
                 'Authorization': ORS_API_KEY,
                 'Content-Type': 'application/json'
             },
-            body: JSON.stringify({ coordinates: [startCoord, endCoord] }),
+            body: JSON.stringify({ 
+                coordinates: [startCoord, endCoord],
+                radiuses: [-1, -1]
+            }),
             signal: controller.signal
         });
         clearTimeout(timeoutId);
@@ -607,15 +611,19 @@ async function updateNavSegmentRoute(forceIdx = null) {
         if (response.ok) {
             const data = await response.json();
             if (data && data.features && data.features[0] && data.features[0].geometry) {
-                currentRouteGeometry = data.features[0].geometry;
+                fullNavRouteGeometry = data.features[0].geometry;
+                currentRouteGeometry = JSON.parse(JSON.stringify(fullNavRouteGeometry));
             } else {
-                currentRouteGeometry = { 'type': 'LineString', 'coordinates': [startCoord, endCoord] };
+                fullNavRouteGeometry = { 'type': 'LineString', 'coordinates': [startCoord, endCoord] };
+                currentRouteGeometry = JSON.parse(JSON.stringify(fullNavRouteGeometry));
             }
         } else {
-            currentRouteGeometry = { 'type': 'LineString', 'coordinates': [startCoord, endCoord] };
+            fullNavRouteGeometry = { 'type': 'LineString', 'coordinates': [startCoord, endCoord] };
+            currentRouteGeometry = JSON.parse(JSON.stringify(fullNavRouteGeometry));
         }
     } catch (err) {
-        currentRouteGeometry = { 'type': 'LineString', 'coordinates': [startCoord, endCoord] };
+        fullNavRouteGeometry = { 'type': 'LineString', 'coordinates': [startCoord, endCoord] };
+        currentRouteGeometry = JSON.parse(JSON.stringify(fullNavRouteGeometry));
     }
 
     updateRouteOnMap();
@@ -715,6 +723,8 @@ function toggleNavigationMode(forceIdx = null) {
         }
         if (topNavBtnText) topNavBtnText.textContent = "Navegação";
 
+        fullNavRouteGeometry = null;
+
         map.easeTo({
             bearing: 0,
             pitch: 0,
@@ -730,6 +740,7 @@ function toggleNavigationMode(forceIdx = null) {
 function handleFile(file) {
     localStorage.removeItem(STORAGE_KEY);
     currentRouteGeometry = null;
+    fullNavRouteGeometry = null;
     currentRouteDistanceKm = '0';
     updateRouteOnMap();
     document.getElementById('dist-badge').classList.add('hidden');
