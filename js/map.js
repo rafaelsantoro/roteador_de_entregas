@@ -1,4 +1,16 @@
-/* --- MANIPULAÇÃO DO MAPA, GPS E NAVEGAÇÃO 3D --- */
+/* --- MANIPULAÇÃO DO MAPA, GPS E NAVEGAÇÃO 3D (ANIMAÇÃO FLUÍDA 60FPS) --- */
+
+// Variáveis Globais de Animação e Interpolação
+let navAnimFrame = null;
+let visualPos = null;
+let visualHeading = 0;
+let startPos = null;
+let targetPos = null;
+let startHeading = 0;
+let targetHeading = 0;
+let animStartTime = 0;
+let animDuration = 1000;
+let lastGpsTimestamp = 0;
 
 function boostMapTextLabels() {
     if (!map || isTextBoosted) return;
@@ -114,10 +126,18 @@ function toggleGPS() {
         navigator.geolocation.clearWatch(gpsWatchId);
         gpsWatchId = null;
 
+        if (navAnimFrame !== null) {
+            cancelAnimationFrame(navAnimFrame);
+            navAnimFrame = null;
+        }
+
         if (driverMarker) {
             driverMarker.remove();
             driverMarker = null;
         }
+
+        visualPos = null;
+        lastGpsTimestamp = 0;
 
         btn.className = "absolute bottom-36 right-3 z-20 w-11 h-11 bg-slate-900/90 hover:bg-slate-800 text-slate-300 backdrop-blur-md rounded-full shadow-2xl border border-slate-700 flex items-center justify-center text-lg active:scale-95 transition";
         icon.className = "fa-solid fa-location-crosshairs";
@@ -152,43 +172,96 @@ function calculateBearing(lat1, lng1, lat2, lng2) {
     return (brng + 360) % 360;
 }
 
-function smoothHeadingAngle(current, target, factor = 0.20) {
-    if (target === null || target === undefined || isNaN(target)) return current;
-    let diff = target - current;
+function lerpAngle(start, target, t) {
+    let diff = target - start;
     while (diff < -180) diff += 360;
     while (diff > 180) diff -= 360;
-    if (Math.abs(diff) < 0.8) return current;
-    return (current + diff * factor + 360) % 360;
+    return (start + diff * t + 360) % 360;
+}
+
+// Loop contínuo de renderização suave a 60 FPS
+function startNavAnimationLoop() {
+    if (navAnimFrame !== null) return;
+
+    function renderStep(now) {
+        if (startPos && targetPos) {
+            const elapsed = now - animStartTime;
+            const progress = Math.min(elapsed / animDuration, 1.0);
+
+            // Interpolação linear da coordenada geográfica
+            const lat = startPos.lat + (targetPos.lat - startPos.lat) * progress;
+            const lng = startPos.lng + (targetPos.lng - startPos.lng) * progress;
+            
+            visualPos = { lat, lng };
+            visualHeading = lerpAngle(startHeading, targetHeading, Math.min(progress * 1.5, 1.0));
+
+            // Atualização fluída do ícone do veículo
+            if (driverMarker) {
+                driverMarker.setLngLat([lng, lat]);
+                const arrowIcon = document.getElementById('driver-arrow-icon');
+                if (arrowIcon) {
+                    const arrowRotation = isNavMode ? 0 : visualHeading;
+                    arrowIcon.style.transform = `rotate(${arrowRotation}deg)`;
+                }
+            }
+
+            // Atualização fluída da câmera do mapa (sem alterar zoom)
+            if (isNavMode && map) {
+                map.jumpTo({
+                    center: [lng, lat],
+                    bearing: visualHeading,
+                    pitch: is3DMode ? 60 : 0,
+                    padding: getNavPadding()
+                });
+            }
+        }
+
+        navAnimFrame = requestAnimationFrame(renderStep);
+    }
+
+    navAnimFrame = requestAnimationFrame(renderStep);
 }
 
 function onGpsSuccess(position) {
     hideLoading();
     const lng = position.coords.longitude;
     const lat = position.coords.latitude;
+    const now = performance.now();
+
+    // Calcula o intervalo real entre sinal de GPS para ajustar a velocidade da animação
+    if (lastGpsTimestamp > 0) {
+        animDuration = Math.max(300, Math.min(2000, now - lastGpsTimestamp));
+    } else {
+        animDuration = 1000;
+    }
+    lastGpsTimestamp = now;
     
     const isFirstGps = !lastGpsCoords;
-    let targetHeading = null;
+    let newTargetHeading = null;
 
     if (lastGpsCoords) {
         const distMovedMeters = haversine(lastGpsCoords, { lat, lng }) * 1000;
-        if (distMovedMeters >= 1.5) {
-            targetHeading = calculateBearing(lastGpsCoords.lat, lastGpsCoords.lng, lat, lng);
+        if (distMovedMeters >= 1.2) {
+            newTargetHeading = calculateBearing(lastGpsCoords.lat, lastGpsCoords.lng, lat, lng);
         }
     }
 
-    if (targetHeading === null) {
+    if (newTargetHeading === null) {
         if (position.coords.heading !== null && position.coords.heading !== undefined && !isNaN(position.coords.heading)) {
-            targetHeading = position.coords.heading;
+            newTargetHeading = position.coords.heading;
         } else if (deviceAlphaHeading !== null) {
-            targetHeading = deviceAlphaHeading;
+            newTargetHeading = deviceAlphaHeading;
         }
     }
 
-    if (targetHeading !== null) {
-        const factor = (lastGpsCoords && haversine(lastGpsCoords, { lat, lng }) * 1000 >= 1.5) ? 0.30 : 0.08;
-        smoothedHeading = smoothHeadingAngle(smoothedHeading, targetHeading, factor);
-    }
+    // Configura pontos de início e término do quadro de animação
+    startPos = visualPos ? { ...visualPos } : { lat, lng };
+    targetPos = { lat, lng };
 
+    startHeading = visualHeading;
+    targetHeading = (newTargetHeading !== null) ? newTargetHeading : visualHeading;
+
+    animStartTime = now;
     lastGpsCoords = { lat, lng };
 
     if (!driverMarker) {
@@ -202,20 +275,18 @@ function onGpsSuccess(position) {
             </div>
         `;
 
+        visualPos = { lat, lng };
+        visualHeading = targetHeading;
+
         driverMarker = new maplibregl.Marker({ element: el })
             .setLngLat([lng, lat])
             .addTo(map);
-    } else {
-        driverMarker.setLngLat([lng, lat]);
     }
 
-    const arrowIcon = document.getElementById('driver-arrow-icon');
-    if (arrowIcon) {
-        const arrowRotation = isNavMode ? 0 : smoothedHeading;
-        arrowIcon.style.transform = `rotate(${arrowRotation}deg)`;
-    }
+    // Inicia o loop continuo de renderização a 60 FPS
+    startNavAnimationLoop();
 
-    // Monitorização de Posição e Recálculo da Rota
+    // Recálculo da rota e corte visual de trecho já percorrido
     if (isNavMode && fullNavRouteGeometry && fullNavRouteGeometry.coordinates && fullNavRouteGeometry.coordinates.length > 1) {
         const fullCoords = fullNavRouteGeometry.coordinates;
         let closestIdx = 0;
@@ -229,11 +300,11 @@ function onGpsSuccess(position) {
             }
         }
 
-        const now = Date.now();
+        const currentTimestamp = Date.now();
         const distMeters = minD * 1000;
 
-        if (distMeters > 40 && (now - lastRecalcTime > 5000)) {
-            lastRecalcTime = now;
+        if (distMeters > 40 && (currentTimestamp - lastRecalcTime > 5000)) {
+            lastRecalcTime = currentTimestamp;
             if (isCustomSearchNav && searchMarker) {
                 const targetLngLat = searchMarker.getLngLat();
                 const addressText = document.getElementById('nav-next-address').textContent;
@@ -259,20 +330,8 @@ function onGpsSuccess(position) {
         }
     }
 
-    if (isNavMode && map) {
-        if (isFirstGps && currentNavIndex >= 0 && !isCustomSearchNav && activePoints && activePoints.length > 0) {
-            updateNavSegmentRoute(currentNavIndex);
-        }
-
-        // Mantém a posição e direção do mapa preservando o nível de zoom atual do utilizador
-        map.easeTo({
-            center: [lng, lat],
-            bearing: smoothedHeading,
-            pitch: is3DMode ? 60 : 0,
-            padding: getNavPadding(),
-            duration: 500,
-            easing: t => t
-        });
+    if (isNavMode && map && isFirstGps && currentNavIndex >= 0 && !isCustomSearchNav && activePoints && activePoints.length > 0) {
+        updateNavSegmentRoute(currentNavIndex);
     }
 }
 
