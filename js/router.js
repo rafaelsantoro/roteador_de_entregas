@@ -631,7 +631,6 @@ async function updateNavSegmentRoute(forceIdx = null) {
     if (map) {
         map.flyTo({
             center: startCoord,
-            zoom: is3DMode ? 17.5 : 16,
             pitch: is3DMode ? 60 : 0,
             padding: getNavPadding(),
             duration: 800
