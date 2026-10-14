@@ -151,7 +151,7 @@ map = new maplibregl.Map({
             }
         ]
     },
-    pixelRatio: window.devicePixelRatio || 2
+    pixelRatio: window.devicePixelRatio || 2,
     center: [-48.91, -23.10],
     zoom: 16
 });
