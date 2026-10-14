@@ -16,13 +16,9 @@ function extractHouseNumber(address) {
 function normalizeStreetName(address) {
     if (!address || typeof address !== 'string') return '';
     
-    // 1. Pega a parte do endereço antes da vírgula
     let part = address.split(',')[0].split('-')[0].trim();
-    
-    // 2. Remove acentos e converte para minúsculas
     part = part.normalize('NFD').replace(/[\u0300-\u036f]/g, '').toLowerCase().trim();
     
-    // 3. Normaliza abreviações comuns para garantir correspondência
     part = part.replace(/\bprof\b|\bprof\./g, 'professor')
                .replace(/\bdr\b|\bdr\./g, 'doutor')
                .replace(/\bdra\b|\bdra\./g, 'doutora')
@@ -34,13 +30,8 @@ function normalizeStreetName(address) {
                .replace(/\bpq\b|\bpq\./g, 'parque')
                .replace(/\bres\b|\bres\./g, 'residencial');
                
-    // 4. Remove prefixos de logradouro
     part = part.replace(/^(rua|r\.|r|avenida|av\.|av|alameda|al\.|al|praca|prc\.|prc|travessa|trv\.|trv|rodovia|rod\.|rod)\s+/, '');
-    
-    // 5. Remove apenas o número da residência no final da rua (ex: "sao paulo 123" -> "sao paulo")
     part = part.replace(/\s+\d+[a-z]?\s*$/i, '');
-    
-    // 6. Limpa caracteres especiais e espaços extras
     part = part.replace(/[^a-z0-9\s]/g, '').replace(/\s+/g, ' ').trim();
     
     return part;
@@ -148,7 +139,77 @@ function haversine(p1, p2) {
     return R * 2 * Math.atan2(Math.sqrt(a), Math.sqrt(1-a));
 }
 
-/* --- MATRIZ DE DISTÂNCIAS E OTIMIZAÇÃO PARA QUALQUER NÚMERO DE PONTOS (>50) --- */
+/* --- ORDENAÇÃO DE PONTOS DA MESMA RUA --- */
+
+function orderStreetBlock(streetPoints, startOrigin) {
+    if (!streetPoints || streetPoints.length <= 1) return [...streetPoints];
+
+    let unvisited = [...streetPoints];
+    let ordered = [];
+    let currentPos = startOrigin;
+
+    while (unvisited.length > 0) {
+        let nearestIdx = 0;
+        let minDist = Infinity;
+
+        for (let i = 0; i < unvisited.length; i++) {
+            let d = haversine(currentPos, unvisited[i]);
+            if (d < minDist) {
+                minDist = d;
+                nearestIdx = i;
+            }
+        }
+
+        let nextPt = unvisited.splice(nearestIdx, 1)[0];
+        ordered.push(nextPt);
+        currentPos = nextPt;
+    }
+
+    return ordered;
+}
+
+function groupDeliveriesByStreetBlock(deliveries, startOrigin) {
+    if (!deliveries || deliveries.length === 0) return [];
+
+    const streetGroups = {};
+    deliveries.forEach(p => {
+        const key = p.streetKey || ('single_' + p.id);
+        if (!streetGroups[key]) streetGroups[key] = [];
+        streetGroups[key].push(p);
+    });
+
+    const unvisitedKeys = Object.keys(streetGroups);
+    const finalRoute = [];
+    let currentPos = startOrigin;
+
+    while (unvisitedKeys.length > 0) {
+        let bestKeyIdx = 0;
+        let minKeyDist = Infinity;
+
+        for (let i = 0; i < unvisitedKeys.length; i++) {
+            const key = unvisitedKeys[i];
+            const block = streetGroups[key];
+            const blockMinDist = Math.min(...block.map(p => haversine(currentPos, p)));
+            if (blockMinDist < minKeyDist) {
+                minKeyDist = blockMinDist;
+                bestKeyIdx = i;
+            }
+        }
+
+        const selectedKey = unvisitedKeys.splice(bestKeyIdx, 1)[0];
+        const block = streetGroups[selectedKey];
+        const orderedBlock = orderStreetBlock(block, currentPos);
+
+        finalRoute.push(...orderedBlock);
+        if (orderedBlock.length > 0) {
+            currentPos = orderedBlock[orderedBlock.length - 1];
+        }
+    }
+
+    return finalRoute;
+}
+
+/* --- MATRIZ DE DISTÂNCIAS E OTIMIZAÇÃO --- */
 
 async function fetchDistanceMatrixChunk(locations) {
     if (!navigator.onLine || !locations || locations.length < 2) return null;
@@ -179,9 +240,88 @@ async function fetchDistanceMatrixChunk(locations) {
         const data = await response.json();
         return data && data.distances ? data.distances : null;
     } catch (e) {
-        console.warn("Falha no lote da matriz ORS. A aplicar fallback por Haversine.", e);
+        console.warn("Falha no lote da matriz ORS. Aplicando fallback por Haversine.", e);
         return null;
     }
+}
+
+async function optimizeSingleCluster(clusterPoints, startOrigin, endDestination, prioritizeSameStreet, manualFirstIdx = -1) {
+    if (!clusterPoints || clusterPoints.length === 0) return [];
+    if (clusterPoints.length === 1) return [...clusterPoints];
+
+    if (prioritizeSameStreet) {
+        return groupDeliveriesByStreetBlock(clusterPoints, startOrigin);
+    }
+
+    const clusterLocations = [startOrigin, ...clusterPoints, endDestination];
+    const originIdx = 0;
+    const destIdx = clusterLocations.length - 1;
+
+    const deliveryWithIdx = clusterPoints.map((d, i) => ({ ...d, matrixIdx: i + 1 }));
+    const matrix = await fetchDistanceMatrixChunk(clusterLocations);
+
+    function getRawDist(i, j) {
+        if (matrix && matrix[i] && matrix[i][j] !== null && matrix[i][j] !== undefined) {
+            return matrix[i][j] / 1000.0;
+        }
+        return haversine(clusterLocations[i], clusterLocations[j]);
+    }
+
+    let unvisited = [...deliveryWithIdx];
+    let route = [];
+
+    if (manualFirstIdx >= 0 && manualFirstIdx < unvisited.length) {
+        let first = unvisited.splice(manualFirstIdx, 1)[0];
+        route.push(first);
+    }
+
+    while (unvisited.length > 0) {
+        let currentItem = route.length > 0 ? route[route.length - 1] : null;
+        let currentIdx = currentItem ? currentItem.matrixIdx : originIdx;
+
+        let nearestIdxInUnvisited = 0;
+        let minDist = Infinity;
+
+        for (let i = 0; i < unvisited.length; i++) {
+            let candidate = unvisited[i];
+            let d = getRawDist(currentIdx, candidate.matrixIdx);
+            if (d < minDist) {
+                minDist = d;
+                nearestIdxInUnvisited = i;
+            }
+        }
+
+        route.push(unvisited.splice(nearestIdxInUnvisited, 1)[0]);
+    }
+
+    let improved = true;
+    let count = 0;
+    let startI = (manualFirstIdx >= 0) ? 1 : 0;
+
+    while (improved && count < 50) {
+        improved = false;
+        count++;
+        for (let i = startI; i < route.length - 1; i++) {
+            for (let j = i + 1; j < route.length; j++) {
+                let prevItem = (i === 0) ? null : route[i - 1];
+                let prevIdx = prevItem ? prevItem.matrixIdx : originIdx;
+
+                let nextItem = (j === route.length - 1) ? null : route[j + 1];
+                let nextIdx = nextItem ? nextItem.matrixIdx : destIdx;
+
+                let d1 = getRawDist(prevIdx, route[i].matrixIdx) + getRawDist(route[j].matrixIdx, nextIdx);
+                let d2 = getRawDist(prevIdx, route[j].matrixIdx) + getRawDist(route[i].matrixIdx, nextIdx);
+
+                if (d2 < d1) {
+                    let segment = route.slice(i, j + 1).reverse();
+                    route.splice(i, j - i + 1, ...segment);
+                    improved = true;
+                }
+            }
+        }
+    }
+
+    return route.map(({ matrixIdx, ...rest }) => rest);
 }
 
 function createSpatialClusters(deliveries, maxClusterSize = 40) {
@@ -228,113 +368,35 @@ function createSpatialClusters(deliveries, maxClusterSize = 40) {
     return clusters;
 }
 
-async function optimizeSingleCluster(clusterPoints, startOrigin, endDestination, prioritizeSameStreet, manualFirstIdx = -1) {
-    if (!clusterPoints || clusterPoints.length === 0) return [];
-    if (clusterPoints.length === 1) return [...clusterPoints];
-
-    const clusterLocations = [startOrigin, ...clusterPoints, endDestination];
-    const originIdx = 0;
-    const destIdx = clusterLocations.length - 1;
-
-    const deliveryWithIdx = clusterPoints.map((d, i) => ({ ...d, matrixIdx: i + 1 }));
-    const matrix = await fetchDistanceMatrixChunk(clusterLocations);
-
-    function getRawDist(i, j) {
-        if (matrix && matrix[i] && matrix[i][j] !== null && matrix[i][j] !== undefined) {
-            return matrix[i][j] / 1000.0;
-        }
-        return haversine(clusterLocations[i], clusterLocations[j]);
-    }
-
-    function getPenaltyDist(i, j, p1, p2) {
-        let d = getRawDist(i, j);
-        if (prioritizeSameStreet && p1 && p2 && p1.streetKey && p2.streetKey && p1.streetKey === p2.streetKey) {
-            return d - 1000.0;
-        }
-        return d;
-    }
-
-    let unvisited = [...deliveryWithIdx];
-    let route = [];
-
-    if (manualFirstIdx >= 0 && manualFirstIdx < unvisited.length) {
-        let first = unvisited.splice(manualFirstIdx, 1)[0];
-        route.push(first);
-    }
-
-    while (unvisited.length > 0) {
-        let currentItem = route.length > 0 ? route[route.length - 1] : null;
-        let currentIdx = currentItem ? currentItem.matrixIdx : originIdx;
-        let currentStreetKey = currentItem ? currentItem.streetKey : '';
-
-        let sameStreetCandidates = (prioritizeSameStreet && currentStreetKey)
-            ? unvisited.filter(p => p.streetKey && p.streetKey === currentStreetKey)
-            : [];
-
-        let candidatePool = sameStreetCandidates.length > 0 ? sameStreetCandidates : unvisited;
-
-        let nearestIdxInUnvisited = 0;
-        let minDist = Infinity;
-
-        for (let i = 0; i < unvisited.length; i++) {
-            let candidate = unvisited[i];
-            if (candidatePool.includes(candidate)) {
-                let d = getRawDist(currentIdx, candidate.matrixIdx);
-                if (d < minDist) {
-                    minDist = d;
-                    nearestIdxInUnvisited = i;
-                }
-            }
-        }
-
-        route.push(unvisited.splice(nearestIdxInUnvisited, 1)[0]);
-    }
-
-    let improved = true;
-    let count = 0;
-    let startI = (manualFirstIdx >= 0) ? 1 : 0;
-
-    while (improved && count < 50) {
-        improved = false;
-        count++;
-        for (let i = startI; i < route.length - 1; i++) {
-            for (let j = i + 1; j < route.length; j++) {
-                let prevItem = (i === 0) ? null : route[i - 1];
-                let prevIdx = prevItem ? prevItem.matrixIdx : originIdx;
-                let prevPoint = prevItem || startOrigin;
-
-                let nextItem = (j === route.length - 1) ? null : route[j + 1];
-                let nextIdx = nextItem ? nextItem.matrixIdx : destIdx;
-                let nextPoint = nextItem || endDestination;
-
-                let d1 = getPenaltyDist(prevIdx, route[i].matrixIdx, prevPoint, route[i]) +
-                         getPenaltyDist(route[j].matrixIdx, nextIdx, route[j], nextPoint);
-
-                let d2 = getPenaltyDist(prevIdx, route[j].matrixIdx, prevPoint, route[j]) +
-                         getPenaltyDist(route[i].matrixIdx, nextIdx, route[i], nextPoint);
-
-                if (d2 < d1) {
-                    let segment = route.slice(i, j + 1).reverse();
-                    route.splice(i, j - i + 1, ...segment);
-                    improved = true;
-                }
-            }
-        }
-    }
-
-    return route.map(({ matrixIdx, ...rest }) => rest);
-}
-
 async function solveDeliveriesTSP(deliveries, manualFirstIdx, prioritizeSameStreet) {
     if (!deliveries || deliveries.length === 0) return [];
+
+    let workingDeliveries = [...deliveries];
+
+    // PRÉ-AGRUPAMENTO: Se o usuário definiu 1ª entrega manual e quer priorizar a mesma rua
+    if (manualFirstIdx >= 0 && manualFirstIdx < workingDeliveries.length && prioritizeSameStreet) {
+        const selectedPoint = workingDeliveries[manualFirstIdx];
+        const targetStreet = selectedPoint.streetKey;
+
+        if (targetStreet) {
+            const sameStreetDeliveries = workingDeliveries.filter(p => p.streetKey === targetStreet);
+            const otherDeliveries = workingDeliveries.filter(p => p.streetKey !== targetStreet);
+
+            const remainingSameStreet = sameStreetDeliveries.filter(p => p.id !== selectedPoint.id);
+            const orderedFirstStreet = [selectedPoint, ...orderStreetBlock(remainingSameStreet, selectedPoint)];
+
+            const lastPointFirstStreet = orderedFirstStreet[orderedFirstStreet.length - 1];
+            const optimizedOthers = await solveDeliveriesTSP(otherDeliveries, -1, prioritizeSameStreet);
+
+            return [...orderedFirstStreet, ...optimizedOthers];
+        }
+    }
 
     if (deliveries.length <= 45) {
         return await optimizeSingleCluster(deliveries, FIXED_PK2U, FIXED_HOME, prioritizeSameStreet, manualFirstIdx);
     }
 
-    let workingDeliveries = [...deliveries];
     let manualFirstPoint = null;
-
     if (manualFirstIdx >= 0 && manualFirstIdx < workingDeliveries.length) {
         manualFirstPoint = workingDeliveries.splice(manualFirstIdx, 1)[0];
     }
@@ -431,7 +493,6 @@ async function fetchDeliveryPolyline(orderedDeliveries) {
 
     try {
         const promises = chunks.map(async (chunk) => {
-            // 1. Tenta via OpenRouteService
             try {
                 const controller = new AbortController();
                 const timeoutId = setTimeout(() => controller.abort(), 8000);
@@ -442,9 +503,7 @@ async function fetchDeliveryPolyline(orderedDeliveries) {
                         'Authorization': ORS_API_KEY,
                         'Content-Type': 'application/json'
                     },
-                    body: JSON.stringify({ 
-                        coordinates: chunk
-                    }),
+                    body: JSON.stringify({ coordinates: chunk }),
                     signal: controller.signal
                 });
                 clearTimeout(timeoutId);
@@ -457,7 +516,6 @@ async function fetchDeliveryPolyline(orderedDeliveries) {
                 }
             } catch (e) {}
 
-            // 2. Fallback via OSRM público
             try {
                 const coordString = chunk.map(c => `${c[0]},${c[1]}`).join(';');
                 const osrmRes = await fetch(`https://router.project-osrm.org/route/v1/driving/${coordString}?overview=full&geometries=geojson`);
@@ -469,7 +527,6 @@ async function fetchDeliveryPolyline(orderedDeliveries) {
                 }
             } catch (e) {}
 
-            // 3. Sequência direta do lote se ambos falharem
             return chunk;
         });
 
@@ -521,7 +578,6 @@ async function fetchFullDayTotalDistance(orderedDeliveries) {
 
     try {
         const promises = chunks.map(async (chunk) => {
-            // 1. Tenta ORS
             try {
                 const controller = new AbortController();
                 const timeoutId = setTimeout(() => controller.abort(), 8000);
@@ -545,7 +601,6 @@ async function fetchFullDayTotalDistance(orderedDeliveries) {
                 }
             } catch (e) {}
 
-            // 2. Fallback OSRM
             try {
                 const coordString = chunk.map(c => `${c[0]},${c[1]}`).join(';');
                 const osrmRes = await fetch(`https://router.project-osrm.org/route/v1/driving/${coordString}?overview=false`);
@@ -658,7 +713,6 @@ async function updateNavSegmentRoute(forceIdx = null) {
     const endCoord = [targetPoint.lng, targetPoint.lat];
     let routeFound = false;
 
-    // 1. Tenta via OpenRouteService
     try {
         const controller = new AbortController();
         const timeoutId = setTimeout(() => controller.abort(), 6000);
@@ -669,9 +723,7 @@ async function updateNavSegmentRoute(forceIdx = null) {
                 'Authorization': ORS_API_KEY,
                 'Content-Type': 'application/json'
             },
-            body: JSON.stringify({ 
-                coordinates: [startCoord, endCoord]
-            }),
+            body: JSON.stringify({ coordinates: [startCoord, endCoord] }),
             signal: controller.signal
         });
         clearTimeout(timeoutId);
@@ -686,7 +738,6 @@ async function updateNavSegmentRoute(forceIdx = null) {
         }
     } catch (err) {}
 
-    // 2. Fallback via OSRM público
     if (!routeFound) {
         try {
             const osrmUrl = `https://router.project-osrm.org/route/v1/driving/${startCoord[0]},${startCoord[1]};${endCoord[0]},${endCoord[1]}?overview=full&geometries=geojson`;
@@ -702,7 +753,6 @@ async function updateNavSegmentRoute(forceIdx = null) {
         } catch (e) {}
     }
 
-    // 3. Linha reta como último recurso (offline)
     if (!routeFound) {
         fullNavRouteGeometry = { 'type': 'LineString', 'coordinates': [startCoord, endCoord] };
         currentRouteGeometry = JSON.parse(JSON.stringify(fullNavRouteGeometry));
