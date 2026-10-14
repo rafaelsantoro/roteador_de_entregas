@@ -216,13 +216,15 @@ function onGpsSuccess(position) {
         arrowIcon.style.transform = `rotate(${arrowRotation}deg)`;
     }
 
-    if (isNavMode && currentRouteGeometry && currentRouteGeometry.coordinates && currentRouteGeometry.coordinates.length > 1) {
-        const coords = currentRouteGeometry.coordinates;
+    // Monitorização de Posição e Recálculo da Rota
+    if (isNavMode && fullNavRouteGeometry && fullNavRouteGeometry.coordinates && fullNavRouteGeometry.coordinates.length > 1) {
+        const fullCoords = fullNavRouteGeometry.coordinates;
         let closestIdx = 0;
         let minD = Infinity;
 
-        for (let i = 0; i < coords.length; i++) {
-            const d = haversine({ lat, lng }, { lat: coords[i][1], lng: coords[i][0] });
+        // Procura a distância até ao ponto mais próximo da geometria original completa
+        for (let i = 0; i < fullCoords.length; i++) {
+            const d = haversine({ lat, lng }, { lat: fullCoords[i][1], lng: fullCoords[i][0] });
             if (d < minD) {
                 minD = d;
                 closestIdx = i;
@@ -230,7 +232,10 @@ function onGpsSuccess(position) {
         }
 
         const now = Date.now();
-        if (minD * 1000 > 45 && (now - lastRecalcTime > 6000)) {
+        const distMeters = minD * 1000;
+
+        // Se estiver desviado mais de 40 metros da rota, força o recálculo
+        if (distMeters > 40 && (now - lastRecalcTime > 5000)) {
             lastRecalcTime = now;
             if (isCustomSearchNav && searchMarker) {
                 const targetLngLat = searchMarker.getLngLat();
@@ -240,9 +245,13 @@ function onGpsSuccess(position) {
                 updateNavSegmentRoute(currentNavIndex);
             }
         } else {
-            const remainingCoords = [[lng, lat], ...coords.slice(closestIdx + 1)];
+            // Se estiver no trajeto correto, recorta o traçado visual mantendo a matriz original intacta
+            const remainingCoords = [[lng, lat], ...fullCoords.slice(closestIdx)];
             if (remainingCoords.length >= 2) {
-                currentRouteGeometry.coordinates = remainingCoords;
+                currentRouteGeometry = {
+                    'type': 'LineString',
+                    'coordinates': remainingCoords
+                };
                 if (map && map.getSource('route-source')) {
                     map.getSource('route-source').setData({
                         'type': 'Feature',
@@ -421,7 +430,10 @@ async function navigateToSearchLocation(lat, lng, name) {
                 'Authorization': ORS_API_KEY,
                 'Content-Type': 'application/json'
             },
-            body: JSON.stringify({ coordinates: [startCoord, endCoord] }),
+            body: JSON.stringify({ 
+                coordinates: [startCoord, endCoord],
+                radiuses: [-1, -1]
+            }),
             signal: controller.signal
         });
         clearTimeout(timeoutId);
@@ -429,15 +441,19 @@ async function navigateToSearchLocation(lat, lng, name) {
         if (response.ok) {
             const data = await response.json();
             if (data && data.features && data.features[0] && data.features[0].geometry) {
-                currentRouteGeometry = data.features[0].geometry;
+                fullNavRouteGeometry = data.features[0].geometry;
+                currentRouteGeometry = JSON.parse(JSON.stringify(fullNavRouteGeometry));
             } else {
-                currentRouteGeometry = { 'type': 'LineString', 'coordinates': [startCoord, endCoord] };
+                fullNavRouteGeometry = { 'type': 'LineString', 'coordinates': [startCoord, endCoord] };
+                currentRouteGeometry = JSON.parse(JSON.stringify(fullNavRouteGeometry));
             }
         } else {
-            currentRouteGeometry = { 'type': 'LineString', 'coordinates': [startCoord, endCoord] };
+            fullNavRouteGeometry = { 'type': 'LineString', 'coordinates': [startCoord, endCoord] };
+            currentRouteGeometry = JSON.parse(JSON.stringify(fullNavRouteGeometry));
         }
     } catch (err) {
-        currentRouteGeometry = { 'type': 'LineString', 'coordinates': [startCoord, endCoord] };
+        fullNavRouteGeometry = { 'type': 'LineString', 'coordinates': [startCoord, endCoord] };
+        currentRouteGeometry = JSON.parse(JSON.stringify(fullNavRouteGeometry));
     }
 
     updateRouteOnMap();
@@ -455,7 +471,7 @@ async function navigateToSearchLocation(lat, lng, name) {
 
 function cancelCustomSearchRoute() {
     isCustomSearchNav = false;
-
+    fullNavRouteGeometry = null;
     currentRouteGeometry = null;
     updateRouteOnMap();
 
