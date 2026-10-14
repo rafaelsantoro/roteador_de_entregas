@@ -89,7 +89,6 @@ function toggle3DMode() {
             map.easeTo({
                 pitch: 60,
                 padding: getNavPadding(),
-                zoom: Math.max(map.getZoom(), 16.5),
                 duration: 800
             });
         }
@@ -222,7 +221,6 @@ function onGpsSuccess(position) {
         let closestIdx = 0;
         let minD = Infinity;
 
-        // Procura a distância até ao ponto mais próximo da geometria original completa
         for (let i = 0; i < fullCoords.length; i++) {
             const d = haversine({ lat, lng }, { lat: fullCoords[i][1], lng: fullCoords[i][0] });
             if (d < minD) {
@@ -234,7 +232,6 @@ function onGpsSuccess(position) {
         const now = Date.now();
         const distMeters = minD * 1000;
 
-        // Se estiver desviado mais de 40 metros da rota, força o recálculo
         if (distMeters > 40 && (now - lastRecalcTime > 5000)) {
             lastRecalcTime = now;
             if (isCustomSearchNav && searchMarker) {
@@ -245,7 +242,6 @@ function onGpsSuccess(position) {
                 updateNavSegmentRoute(currentNavIndex);
             }
         } else {
-            // Se estiver no trajeto correto, recorta o traçado visual mantendo a matriz original intacta
             const remainingCoords = [[lng, lat], ...fullCoords.slice(closestIdx)];
             if (remainingCoords.length >= 2) {
                 currentRouteGeometry = {
@@ -268,11 +264,11 @@ function onGpsSuccess(position) {
             updateNavSegmentRoute(currentNavIndex);
         }
 
+        // Mantém a posição e direção do mapa preservando o nível de zoom atual do utilizador
         map.easeTo({
             center: [lng, lat],
             bearing: smoothedHeading,
             pitch: is3DMode ? 60 : 0,
-            zoom: is3DMode ? 17.5 : 17,
             padding: getNavPadding(),
             duration: 500,
             easing: t => t
@@ -461,7 +457,6 @@ async function navigateToSearchLocation(lat, lng, name) {
     if (map) {
         map.flyTo({
             center: startCoord,
-            zoom: is3DMode ? 17.5 : 16,
             pitch: is3DMode ? 60 : 0,
             padding: getNavPadding(),
             duration: 800
