@@ -125,13 +125,36 @@ document.addEventListener('DOMContentLoaded', () => {
         if (warnBox) warnBox.classList.remove('hidden');
     }
 
-    map = new maplibregl.Map({
-        container: 'map',
-        style: 'https://basemaps.cartocdn.com/gl/voyager-gl-style/style.json',
-        center: [-48.945, -23.107],
-        zoom: 13,
-        pixelRatio: window.devicePixelRatio || 2
-    });
+map = new maplibregl.Map({
+    container: 'map',
+    style: {
+        version: 8,
+        sources: {
+            'osm-tiles': {
+                type: 'raster',
+                tiles: [
+                    'https://a.tile.openstreetmap.org/{z}/{x}/{y}.png',
+                    'https://b.tile.openstreetmap.org/{z}/{x}/{y}.png',
+                    'https://c.tile.openstreetmap.org/{z}/{x}/{y}.png'
+                ],
+                tileSize: 256,
+                attribution: '&copy; OpenStreetMap contributors'
+            }
+        },
+        layers: [
+            {
+                id: 'osm-tiles-layer',
+                type: 'raster',
+                source: 'osm-tiles',
+                minzoom: 0,
+                maxzoom: 19
+            }
+        ]
+    },
+    pixelRatio: window.devicePixelRatio || 2
+    center: [-48.91, -23.10],
+    zoom: 16
+});
 
     map.addControl(new maplibregl.NavigationControl({ showCompass: false }), 'bottom-right');
 
