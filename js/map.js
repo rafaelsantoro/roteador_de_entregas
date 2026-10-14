@@ -1,6 +1,6 @@
-/* --- MANIPULAÇÃO DO MAPA, GPS E NAVEGAÇÃO 3D (ANIMAÇÃO FLUÍDA 60FPS) --- */
+/* --- MANIPULAÇÃO DO MAPA, GPS E NAVEGAÇÃO 3D (ANIMAÇÃO FLUÍDA 60FPS & BUSCA COM NÚMERO) --- */
 
-// Variáveis Globais de Animação e Interpolação
+// Variáveis Globais de Animação, Interpolação e Localização
 let navAnimFrame = null;
 let visualPos = null;
 let visualHeading = 0;
@@ -11,6 +11,7 @@ let targetHeading = 0;
 let animStartTime = 0;
 let animDuration = 1000;
 let lastGpsTimestamp = 0;
+let cachedCityState = null;
 
 function boostMapTextLabels() {
     if (!map || isTextBoosted) return;
@@ -179,7 +180,6 @@ function lerpAngle(start, target, t) {
     return (start + diff * t + 360) % 360;
 }
 
-// Loop contínuo de renderização suave a 60 FPS
 function startNavAnimationLoop() {
     if (navAnimFrame !== null) return;
 
@@ -188,14 +188,12 @@ function startNavAnimationLoop() {
             const elapsed = now - animStartTime;
             const progress = Math.min(elapsed / animDuration, 1.0);
 
-            // Interpolação linear da coordenada geográfica
             const lat = startPos.lat + (targetPos.lat - startPos.lat) * progress;
             const lng = startPos.lng + (targetPos.lng - startPos.lng) * progress;
             
             visualPos = { lat, lng };
             visualHeading = lerpAngle(startHeading, targetHeading, Math.min(progress * 1.5, 1.0));
 
-            // Atualização fluída do ícone do veículo
             if (driverMarker) {
                 driverMarker.setLngLat([lng, lat]);
                 const arrowIcon = document.getElementById('driver-arrow-icon');
@@ -205,7 +203,6 @@ function startNavAnimationLoop() {
                 }
             }
 
-            // Atualização fluída da câmera do mapa (sem alterar zoom)
             if (isNavMode && map) {
                 map.jumpTo({
                     center: [lng, lat],
@@ -228,7 +225,6 @@ function onGpsSuccess(position) {
     const lat = position.coords.latitude;
     const now = performance.now();
 
-    // Calcula o intervalo real entre sinal de GPS para ajustar a velocidade da animação
     if (lastGpsTimestamp > 0) {
         animDuration = Math.max(300, Math.min(2000, now - lastGpsTimestamp));
     } else {
@@ -254,7 +250,6 @@ function onGpsSuccess(position) {
         }
     }
 
-    // Configura pontos de início e término do quadro de animação
     startPos = visualPos ? { ...visualPos } : { lat, lng };
     targetPos = { lat, lng };
 
@@ -283,10 +278,8 @@ function onGpsSuccess(position) {
             .addTo(map);
     }
 
-    // Inicia o loop continuo de renderização a 60 FPS
     startNavAnimationLoop();
 
-    // Recálculo da rota e corte visual de trecho já percorrido
     if (isNavMode && fullNavRouteGeometry && fullNavRouteGeometry.coordinates && fullNavRouteGeometry.coordinates.length > 1) {
         const fullCoords = fullNavRouteGeometry.coordinates;
         let closestIdx = 0;
@@ -353,8 +346,33 @@ function onGpsError(err) {
     toggleGPS();
 }
 
-function toggleSearchBox(forceOpen) {
+/* --- DETECÇÃO DO MUNICÍPIO E ESTADO VIA GPS --- */
+
+async function detectCurrentCityState() {
+    if (cachedCityState) return cachedCityState;
+
+    const refCoords = lastGpsCoords || FIXED_PK2U;
+    if (!refCoords) return '';
+
+    try {
+        const res = await fetch(`https://nominatim.openstreetmap.org/reverse?format=json&lat=${refCoords.lat}&lon=${refCoords.lng}&zoom=10`);
+        const data = await res.json();
+        if (data && data.address) {
+            const city = data.address.city || data.address.town || data.address.municipality || data.address.village || '';
+            const state = data.address.state || '';
+            if (city || state) {
+                cachedCityState = [city, state].filter(Boolean).join(' - ');
+                return cachedCityState;
+            }
+        }
+    } catch(e) {}
+    return '';
+}
+
+async function toggleSearchBox(forceOpen) {
     const box = document.getElementById('search-box-panel');
+    const isOpening = forceOpen === true || (forceOpen !== false && box.classList.contains('hidden'));
+
     if (forceOpen === true) {
         box.classList.remove('hidden');
     } else if (forceOpen === false) {
@@ -362,21 +380,58 @@ function toggleSearchBox(forceOpen) {
     } else {
         box.classList.toggle('hidden');
     }
-    if (!box.classList.contains('hidden')) {
+
+    if (isOpening) {
         document.getElementById('search-address-input').focus();
+        const cityHint = document.getElementById('search-city-hint');
+        if (cityHint) {
+            cityHint.classList.remove('hidden');
+            cityHint.textContent = '📍 Detectando município e estado...';
+            const locationStr = await detectCurrentCityState();
+            if (locationStr) {
+                cityHint.textContent = `📍 Busca otimizada para: ${locationStr}`;
+            } else {
+                cityHint.classList.add('hidden');
+            }
+        }
     }
 }
 
 async function executeAddressSearch() {
-    const query = document.getElementById('search-address-input').value.trim();
+    const queryInput = document.getElementById('search-address-input').value.trim();
     const resultsContainer = document.getElementById('search-results-list');
-    if (!query) return;
+    if (!queryInput) return;
 
-    resultsContainer.innerHTML = '<p class="text-slate-400 text-[11px] p-1">Buscando endereço...</p>';
+    resultsContainer.innerHTML = '<p class="text-slate-400 text-[11px] p-1"><i class="fa-solid fa-spinner animate-spin mr-1"></i>Buscando endereço com número...</p>';
+
+    const refCoords = lastGpsCoords || FIXED_PK2U;
+    let searchQuery = queryInput;
+    const cityState = await detectCurrentCityState();
+
+    if (cityState) {
+        const cityName = cityState.split(' - ')[0].toLowerCase();
+        if (!queryInput.toLowerCase().includes(cityName)) {
+            searchQuery = `${queryInput}, ${cityState}, Brasil`;
+        }
+    }
+
+    let url = `https://nominatim.openstreetmap.org/search?format=json&q=${encodeURIComponent(searchQuery)}&limit=7&countrycodes=br&addressdetails=1`;
+
+    if (refCoords) {
+        const delta = 0.3;
+        const viewbox = `${refCoords.lng - delta},${refCoords.lat + delta},${refCoords.lng + delta},${refCoords.lat - delta}`;
+        url += `&viewbox=${viewbox}&bounded=0`;
+    }
 
     try {
-        const res = await fetch(`https://nominatim.openstreetmap.org/search?format=json&q=${encodeURIComponent(query)}&limit=5&countrycodes=br`);
-        const data = await res.json();
+        let res = await fetch(url);
+        let data = await res.json();
+
+        if ((!data || data.length === 0) && searchQuery !== queryInput) {
+            const fallbackUrl = `https://nominatim.openstreetmap.org/search?format=json&q=${encodeURIComponent(queryInput)}&limit=7&countrycodes=br&addressdetails=1`;
+            res = await fetch(fallbackUrl);
+            data = await res.json();
+        }
 
         if (!data || data.length === 0) {
             resultsContainer.innerHTML = '<p class="text-rose-400 text-[11px] p-1">Nenhum endereço encontrado.</p>';
@@ -387,8 +442,12 @@ async function executeAddressSearch() {
         data.forEach(item => {
             const btn = document.createElement('button');
             btn.className = 'w-full text-left p-2 hover:bg-slate-800 rounded-lg text-[11px] text-slate-200 truncate border-b border-slate-800/60 flex items-center space-x-2';
-            btn.innerHTML = `<i class="fa-solid fa-location-dot text-amber-400 shrink-0"></i><span class="truncate">${item.display_name}</span>`;
-            btn.onclick = () => selectSearchResult(parseFloat(item.lat), parseFloat(item.lon), item.display_name);
+            
+            const houseNum = item.address && item.address.house_number ? ` (Nº ${item.address.house_number})` : '';
+            const displayName = item.display_name;
+
+            btn.innerHTML = `<i class="fa-solid fa-location-dot text-amber-400 shrink-0"></i><span class="truncate"><strong>${displayName.split(',')[0]}${houseNum}</strong> - ${displayName}</span>`;
+            btn.onclick = () => selectSearchResult(parseFloat(item.lat), parseFloat(item.lon), displayName);
             resultsContainer.appendChild(btn);
         });
     } catch(err) {
