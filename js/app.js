@@ -137,7 +137,7 @@ map = new maplibregl.Map({
                     'https://b.tile.openstreetmap.org/{z}/{x}/{y}.png',
                     'https://c.tile.openstreetmap.org/{z}/{x}/{y}.png'
                 ],
-                tileSize: 256,
+                tileSize: 128,
                 attribution: '&copy; OpenStreetMap contributors'
             }
         },
