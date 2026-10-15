@@ -303,7 +303,21 @@ function updateRouteStatusUI() {
     if (btn) btn.classList.toggle('hidden', !(total && ready < total));
 
     const dt = document.getElementById('dist-text');
-    if (dt && total) dt.textContent = `${ready < total ? '≈ ' : ''}${currentRouteDistanceKm} km`;
+    if (dt && total) {
+        // Cálculo do tempo estimado
+        const totalPackages = activePoints ? activePoints.length : 0;
+        const deliveryTimeMinutes = totalPackages * 1; // 1 minuto por pacote
+
+        // Estima o tempo de direção (se não houver matriz, usa 25 km/h)
+        const driveTimeMinutes = Math.round((parseFloat(currentRouteDistanceKm) / AVG_SPEED_KMH) * 60);
+        const totalMinutes = driveTimeMinutes + deliveryTimeMinutes;
+
+        const hours = Math.floor(totalMinutes / 60);
+        const mins = totalMinutes % 60;
+        const timeFormatted = hours > 0 ? `${hours}h ${mins}min` : `${mins} min`;
+
+        dt.textContent = `${ready < total ? '≈ ' : ''}${currentRouteDistanceKm} km | ⏱️ ${timeFormatted}`;
+    }
 }
 
 // Monta tudo a partir do que está guardado no aparelho (sem internet)

@@ -1,6 +1,12 @@
 // Constantes de configuração e APIs
+const CARTO_API_KEY = 'cb1_4b9r_1_b3f372a90351c2d3b18c8639';
 const ORS_API_KEY = 'eyJvcmciOiI1YjNjZTM1OTc4NTExMTAwMDFjZjYyNDgiLCJpZCI6ImIwNzE4MDA5ZDMzMTRhM2RiZjNjY2EyYTQ2ZDFhZWM2IiwiaCI6Im11cm11cjY0In0=';
 const STORAGE_KEY = 'delivery_router_saved_state';
+
+// URLs de estilos e tiles do CARTO
+//const CARTO_RASTER_URL = `https://basemaps.cartocdn.com/rastertiles/voyager/{z}/{x}/{y}.png?key=${CARTO_API_KEY}`;
+const CARTO_RASTER_URL = `https://tile.openstreetmap.org/{z}/{x}/{y}.png?key=${CARTO_API_KEY}`;
+const LIGHT_THEME_URL = `https://basemaps.cartocdn.com/gl/voyager-gl-style/style.json?key=${CARTO_API_KEY}`;
 
 // --- Provedores de rota e limites (pensado para gastar pouca internet) ---
 const ROUTING_PROVIDERS = ['osrm', 'ors'];      // ordem de tentativa: OSRM público primeiro, ORS como reserva
@@ -16,8 +22,7 @@ const NAV_ARRIVED_METERS = 60;      // perto do destino: nunca recalcula
 const SAME_LOCATION_METERS = 15;    // pacotes a menos disso viram uma única parada
 const SAME_STREET_PENALTY_SEC = 120;// custo (em segundos) de sair de uma rua antes de terminá-la
 const DETOUR_FACTOR = 1.4;          // estimativa sem internet: linha reta x 1,4
-const AVG_SPEED_KMH = 25;           // estimativa sem internet: velocidade média urbana
-const LIGHT_THEME_URL = 'https://basemaps.cartocdn.com/gl/voyager-gl-style/style.json';
+const AVG_SPEED_KMH = 15;           // estimativa sem internet: velocidade média urbana
 
 // Pontos Fixos
 const FIXED_HOME = { lat: -23.086416, lng: -48.918759 };

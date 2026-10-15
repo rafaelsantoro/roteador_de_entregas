@@ -131,29 +131,27 @@ document.addEventListener('DOMContentLoaded', () => {
         if (warnBox) warnBox.classList.remove('hidden');
     }
 
-    map = new maplibregl.Map({
+map = new maplibregl.Map({
         container: 'map',
-        maxZoom: 20, // Limite máximo de zoom da câmera para o usuário
+        maxZoom: 20,
         style: {
             version: 8,
             sources: {
-                'osm-tiles': {
+                'carto-tiles': {
                     type: 'raster',
                     tiles: [
-                        'https://a.tile.openstreetmap.org/{z}/{x}/{y}.png',
-                        'https://b.tile.openstreetmap.org/{z}/{x}/{y}.png',
-                        'https://c.tile.openstreetmap.org/{z}/{x}/{y}.png'
+                        CARTO_RASTER_URL
                     ],
-                    tileSize: 256, // Tamanho padrão dos tiles do OpenStreetMap
-                    maxzoom: 19,   // Limite do servidor do OSM. O MapLibre para as requisições aqui e estica a imagem nos zooms maiores
-                    attribution: '&copy; OpenStreetMap contributors'
+                    tileSize: 256,
+                    maxzoom: 19,
+                    attribution: '&copy; <a href="https://carto.com/">CARTO</a> &copy; <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a>'
                 }
             },
             layers: [
                 {
-                    id: 'osm-tiles-layer',
+                    id: 'carto-tiles-layer',
                     type: 'raster',
-                    source: 'osm-tiles',
+                    source: 'carto-tiles',
                     minzoom: 0,
                     maxzoom: 22
                 }

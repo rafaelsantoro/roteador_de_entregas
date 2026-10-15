@@ -852,22 +852,19 @@ async function downloadAvareUrbanMap(minZoom = 14, maxZoom = 17) {
         return;
     }
 
-    const subdomains = ['a', 'b', 'c'];
     const urlsToFetch = new Set();
 
-    // Calcula os tiles necessários para cada nível de zoom dentro do quadrado urbano
     for (let z = minZoom; z <= maxZoom; z++) {
         const xMin = lng2tile(AVARE_URBAN_BBOX.westLng, z);
         const xMax = lng2tile(AVARE_URBAN_BBOX.eastLng, z);
-        
-        // No sistema Web Mercator, a latitude Norte gera um Y menor que a latitude Sul
         const yMin = lat2tile(AVARE_URBAN_BBOX.northLat, z);
         const yMax = lat2tile(AVARE_URBAN_BBOX.southLat, z);
 
         for (let x = xMin; x <= xMax; x++) {
             for (let y = yMin; y <= yMax; y++) {
-                const sub = subdomains[Math.abs(x + y) % 3];
-                urlsToFetch.add(`https://${sub}.tile.openstreetmap.org/${z}/${x}/${y}.png`);
+                // Monta a URL dos tiles com a chave da CARTO
+                const tileUrl = CARTO_RASTER_URL.replace('{z}', z).replace('{x}', x).replace('{y}', y);
+                urlsToFetch.add(tileUrl);
             }
         }
     }
@@ -880,7 +877,6 @@ async function downloadAvareUrbanMap(minZoom = 14, maxZoom = 17) {
         const urlArray = Array.from(urlsToFetch);
         let downloaded = 0;
 
-        // Processa em pequenos lotes de 10 para transferência rápida sem travar a rede
         for (let i = 0; i < urlArray.length; i += 10) {
             const batch = urlArray.slice(i, i + 10);
             await Promise.all(batch.map(async (url) => {
@@ -897,9 +893,9 @@ async function downloadAvareUrbanMap(minZoom = 14, maxZoom = 17) {
             showLoading(`A descarregar Avaré Offline (${Math.min(downloaded, totalTiles)}/${totalTiles})...`);
         }
 
-        alert(`Download concluído! A área urbana de Avaré (${totalTiles} blocos) está salva e pronta para uso sem internet.`);
+        alert(`Download concluído! O mapa urbano de Avaré (${totalTiles} imagens) foi guardado com sucesso via CARTO.`);
     } catch (e) {
-        console.error("Erro ao guardar mapa offline de Avaré:", e);
+        console.error("Erro ao guardar mapa offline:", e);
         alert("Ocorreu uma falha ao guardar o mapa offline.");
     } finally {
         hideLoading();
