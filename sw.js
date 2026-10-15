@@ -60,8 +60,8 @@ self.addEventListener('fetch', (event) => {
 
   const url = new URL(req.url);
 
-  // 1. Tiles do mapa: usa o que está salvo; o que for visto online passa a ficar salvo
-  if (url.hostname.includes('tile.openstreetmap.org')) {
+// 1. Tiles do mapa (CARTO / OSM): usa o que está salvo; o que for visto online passa a ficar salvo
+  if (url.hostname.includes('cartocdn.com') || url.hostname.includes('tile.openstreetmap.org')) {
     event.respondWith(
       caches.open(TILE_CACHE_NAME).then(async (cache) => {
         const cached = await cache.match(req);
