@@ -278,52 +278,8 @@ function onGpsSuccess(position) {
 
     startNavAnimationLoop();
 
-    // Monitorização de Posição e Recálculo
-    if (isNavMode && fullNavRouteGeometry && fullNavRouteGeometry.coordinates && fullNavRouteGeometry.coordinates.length > 1) {
-        const fullCoords = fullNavRouteGeometry.coordinates;
-        let closestIdx = 0;
-        let minD = Infinity;
-
-        for (let i = 0; i < fullCoords.length; i++) {
-            const d = haversine({ lat, lng }, { lat: fullCoords[i][1], lng: fullCoords[i][0] });
-            if (d < minD) {
-                minD = d;
-                closestIdx = i;
-            }
-        }
-
-        const currentTimestamp = Date.now();
-        const distMeters = minD * 1000;
-
-        // Se a rota usava ponto temporário ou se o veículo desviou mais de 35 metros, força recálculo direto do GPS atual
-        if ((isFallbackOrigin || distMeters > 35) && (currentTimestamp - lastRecalcTime > 3000)) {
-            lastRecalcTime = currentTimestamp;
-            isFallbackOrigin = false;
-
-            if (isCustomSearchNav && searchMarker) {
-                const targetLngLat = searchMarker.getLngLat();
-                const addressText = document.getElementById('nav-next-address').textContent;
-                navigateToSearchLocation(targetLngLat.lat, targetLngLat.lng, addressText);
-            } else if (currentNavIndex >= 0 && activePoints && activePoints[currentNavIndex]) {
-                updateNavSegmentRoute(currentNavIndex);
-            }
-        } else {
-            const remainingCoords = [[lng, lat], ...fullCoords.slice(closestIdx)];
-            if (remainingCoords.length >= 2) {
-                currentRouteGeometry = {
-                    'type': 'LineString',
-                    'coordinates': remainingCoords
-                };
-                if (map && map.getSource('route-source')) {
-                    map.getSource('route-source').setData({
-                        'type': 'Feature',
-                        'properties': {},
-                        'geometry': currentRouteGeometry
-                    });
-                }
-            }
-        }
-    }
+    // Linha de guia da navegação: usa o trecho planejado salvo no aparelho e só consulta a internet em caso de desvio real
+    onNavGpsUpdate(lat, lng);
 }
 
 function onGpsError(err) {
@@ -537,40 +493,24 @@ async function navigateToSearchLocation(lat, lng, name) {
     }
 
     const endCoord = [lng, lat];
+    navGuideIsStraight = false;
 
-    try {
-        const controller = new AbortController();
-        const timeoutId = setTimeout(() => controller.abort(), 10000);
+    let res = null;
+    if (navigator.onLine) {
+        try {
+            res = await getNavRoute({ lat: startCoord[1], lng: startCoord[0] }, { lat, lng });
+        } catch (err) { res = null; }
+    }
 
-        const response = await fetch('https://api.openrouteservice.org/v2/directions/driving-car/geojson', {
-            method: 'POST',
-            headers: {
-                'Authorization': ORS_API_KEY,
-                'Content-Type': 'application/json'
-            },
-            body: JSON.stringify({ 
-                coordinates: [startCoord, endCoord]
-            }),
-            signal: controller.signal
-        });
-        clearTimeout(timeoutId);
-
-        if (response.ok) {
-            const data = await response.json();
-            if (data && data.features && data.features[0] && data.features[0].geometry) {
-                fullNavRouteGeometry = data.features[0].geometry;
-                currentRouteGeometry = JSON.parse(JSON.stringify(fullNavRouteGeometry));
-            } else {
-                fullNavRouteGeometry = { 'type': 'LineString', 'coordinates': [startCoord, endCoord] };
-                currentRouteGeometry = JSON.parse(JSON.stringify(fullNavRouteGeometry));
-            }
-        } else {
-            fullNavRouteGeometry = { 'type': 'LineString', 'coordinates': [startCoord, endCoord] };
-            currentRouteGeometry = JSON.parse(JSON.stringify(fullNavRouteGeometry));
-        }
-    } catch (err) {
-        fullNavRouteGeometry = { 'type': 'LineString', 'coordinates': [startCoord, endCoord] };
-        currentRouteGeometry = JSON.parse(JSON.stringify(fullNavRouteGeometry));
+    if (res && res.c && res.c.length > 1) {
+        fullNavRouteGeometry = { type: 'LineString', coordinates: res.c };
+        navFailCount = 0;
+        navBlockedUntil = Date.now() + NAV_MIN_INTERVAL_MS;
+    } else {
+        fullNavRouteGeometry = { type: 'LineString', coordinates: [startCoord, endCoord] };
+        navGuideIsStraight = true;
+        navFailCount++;
+        navBlockedUntil = Date.now() + Math.min(300000, NAV_MIN_INTERVAL_MS * Math.pow(2, navFailCount - 1));
     }
 
     updateRouteOnMap();
@@ -588,7 +528,7 @@ async function navigateToSearchLocation(lat, lng, name) {
 function cancelCustomSearchRoute() {
     isCustomSearchNav = false;
     fullNavRouteGeometry = null;
-    currentRouteGeometry = null;
+    navGuideIsStraight = false;
     updateRouteOnMap();
 
     if (searchMarker) {
@@ -635,38 +575,49 @@ function ensureArrowIcon() {
     } catch(e) {}
 }
 
+function _setGeoSource(id, geometry) {
+    const data = { 'type': 'Feature', 'properties': {}, 'geometry': geometry };
+    try {
+        if (!map.getSource(id)) {
+            map.addSource(id, { 'type': 'geojson', 'data': data });
+        } else {
+            map.getSource(id).setData(data);
+        }
+    } catch (e) {}
+}
+
 function updateRouteOnMap() {
     if (!map) return;
 
-    let routeGeometry = currentRouteGeometry;
+    const empty = { 'type': 'LineString', 'coordinates': [] };
 
-    if (!routeGeometry || !routeGeometry.coordinates || routeGeometry.coordinates.length === 0) {
-        if (activePoints && activePoints.length > 0) {
-            routeGeometry = {
-                'type': 'LineString',
-                'coordinates': activePoints.map(p => [p.lng, p.lat])
-            };
-        } else {
-            routeGeometry = { 'type': 'LineString', 'coordinates': [] };
-        }
-    }
+    // Rota planejada: apenas trechos reais entre as entregas (já salvos no aparelho)
+    const knownLegs = (plannedLegGeoms || []).filter(g => g && g.length > 1);
+    const plannedGeom = knownLegs.length ? { 'type': 'MultiLineString', 'coordinates': knownLegs } : empty;
 
-    const geojsonData = {
-        'type': 'Feature',
-        'properties': {},
-        'geometry': routeGeometry
-    };
+    // Trechos ainda não baixados: tracejado cinza, para nunca parecer uma rota de verdade
+    const gapGeom = (plannedGapSegments && plannedGapSegments.length)
+        ? { 'type': 'MultiLineString', 'coordinates': plannedGapSegments } : empty;
 
-    const lineColor = '#ef4444';
+    // Guia da navegação (veículo -> próxima entrega)
+    const hasNav = isNavMode && fullNavRouteGeometry && fullNavRouteGeometry.coordinates && fullNavRouteGeometry.coordinates.length > 1;
+    const navRouted = (hasNav && !navGuideIsStraight) ? fullNavRouteGeometry : empty;
+    const navStraight = (hasNav && navGuideIsStraight) ? fullNavRouteGeometry : empty;
+
+    _setGeoSource('route-gap-source', gapGeom);
+    _setGeoSource('route-source', plannedGeom);
+    _setGeoSource('nav-source', navRouted);
+    _setGeoSource('nav-straight-source', navStraight);
 
     try {
-        if (!map.getSource('route-source')) {
-            map.addSource('route-source', {
-                'type': 'geojson',
-                'data': geojsonData
+        if (!map.getLayer('route-gap-layer')) {
+            map.addLayer({
+                'id': 'route-gap-layer',
+                'type': 'line',
+                'source': 'route-gap-source',
+                'layout': { 'line-join': 'round', 'line-cap': 'butt' },
+                'paint': { 'line-color': '#64748b', 'line-width': 3, 'line-opacity': 0.8, 'line-dasharray': [2, 2] }
             });
-        } else {
-            map.getSource('route-source').setData(geojsonData);
         }
     } catch (e) {}
 
@@ -676,19 +627,11 @@ function updateRouteOnMap() {
                 'id': 'route-layer',
                 'type': 'line',
                 'source': 'route-source',
-                'layout': {
-                    'line-join': 'round',
-                    'line-cap': 'round'
-                },
-                'paint': {
-                    'line-color': lineColor,
-                    'line-width': 5,
-                    'line-opacity': 0.95
-                }
+                'layout': { 'line-join': 'round', 'line-cap': 'round' },
+                'paint': { 'line-color': '#ef4444', 'line-width': 5, 'line-opacity': 0.95 }
             });
-        } else {
-            map.setPaintProperty('route-layer', 'line-color', lineColor);
         }
+        map.setPaintProperty('route-layer', 'line-opacity', isNavMode ? 0.5 : 0.95);
     } catch (e) {}
 
     try {
@@ -709,6 +652,50 @@ function updateRouteOnMap() {
                 }
             });
         }
+    } catch (e) {}
+
+    try {
+        if (!map.getLayer('nav-casing-layer')) {
+            map.addLayer({
+                'id': 'nav-casing-layer',
+                'type': 'line',
+                'source': 'nav-source',
+                'layout': { 'line-join': 'round', 'line-cap': 'round' },
+                'paint': { 'line-color': '#ffffff', 'line-width': 10, 'line-opacity': 0.9 }
+            });
+        }
+        if (!map.getLayer('nav-layer')) {
+            map.addLayer({
+                'id': 'nav-layer',
+                'type': 'line',
+                'source': 'nav-source',
+                'layout': { 'line-join': 'round', 'line-cap': 'round' },
+                'paint': { 'line-color': '#2563eb', 'line-width': 6, 'line-opacity': 0.95 }
+            });
+        }
+        if (!map.getLayer('nav-straight-layer')) {
+            map.addLayer({
+                'id': 'nav-straight-layer',
+                'type': 'line',
+                'source': 'nav-straight-source',
+                'layout': { 'line-join': 'round', 'line-cap': 'butt' },
+                'paint': { 'line-color': '#f59e0b', 'line-width': 4, 'line-opacity': 0.95, 'line-dasharray': [1.5, 1.5] }
+            });
+        }
+    } catch (e) {}
+}
+
+// Atualização leve (1x por segundo): mexe só na linha de guia, sem redesenhar a rota inteira
+function updateNavLayer() {
+    if (!map || !map.getSource('nav-source') || !map.getSource('nav-straight-source')) {
+        updateRouteOnMap();
+        return;
+    }
+    const empty = { 'type': 'LineString', 'coordinates': [] };
+    const hasNav = isNavMode && fullNavRouteGeometry && fullNavRouteGeometry.coordinates && fullNavRouteGeometry.coordinates.length > 1;
+    try {
+        map.getSource('nav-source').setData({ 'type': 'Feature', 'properties': {}, 'geometry': (hasNav && !navGuideIsStraight) ? fullNavRouteGeometry : empty });
+        map.getSource('nav-straight-source').setData({ 'type': 'Feature', 'properties': {}, 'geometry': (hasNav && navGuideIsStraight) ? fullNavRouteGeometry : empty });
     } catch (e) {}
 }
 
@@ -813,16 +800,11 @@ async function renderMapAndUI(points, fetchRoads = true) {
             updateNavSegmentRoute();
         }
     } else if (fetchRoads) {
-        const geom = await fetchDeliveryPolyline(points);
-        const distTotal = await fetchFullDayTotalDistance(points);
-
-        currentRouteGeometry = geom;
-        currentRouteDistanceKm = distTotal;
-
+        await buildPlannedRoute(points, true);   // baixa cada trecho uma vez e guarda no aparelho
         updateRouteOnMap();
 
         document.getElementById('dist-badge').classList.remove('hidden');
-        document.getElementById('dist-text').textContent = `${currentRouteDistanceKm} km`;
+        document.getElementById('dist-text').textContent = `${routeLegsStatus.ready < routeLegsStatus.total ? '≈ ' : ''}${currentRouteDistanceKm} km`;
     } else {
         updateRouteOnMap();
     }
@@ -986,7 +968,7 @@ async function runDemoNavigation() {
 
         // Configura as geometrias globais da rota
         fullNavRouteGeometry = { 'type': 'LineString', 'coordinates': coords };
-        currentRouteGeometry = JSON.parse(JSON.stringify(fullNavRouteGeometry));
+        navGuideIsStraight = false;
         updateRouteOnMap();
 
         // 3. Inicia loop de simulação de movimento do veículo a cada 1.2s

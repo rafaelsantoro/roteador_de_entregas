@@ -139,330 +139,94 @@ function haversine(p1, p2) {
     return R * 2 * Math.atan2(Math.sqrt(a), Math.sqrt(1-a));
 }
 
-/* --- ORDENAÇÃO SEQUENCIAL POR NÚMERO DE CASA E BLOCO DE RUA --- */
+/* --- CHAVES DE RUA (rua + bairro, tolerante a erros de digitação) --- */
 
-function sortStreetByHouseNumbers(streetPoints, startPos) {
-    if (!streetPoints || streetPoints.length <= 1) return [...streetPoints];
-
-    const withNum = streetPoints.map(p => ({
-        point: p,
-        num: extractHouseNumber(p.address)
-    }));
-
-    const validNums = withNum.filter(item => item.num !== null);
-
-    // Se a maioria dos pontos não tem número identificável, usa proximidade encadeada
-    if (validNums.length < streetPoints.length * 0.5) {
-        let unvisited = [...streetPoints];
-        let ordered = [];
-        let curr = startPos;
-        while (unvisited.length > 0) {
-            let nearestIdx = 0;
-            let minDist = Infinity;
-            for (let i = 0; i < unvisited.length; i++) {
-                let d = haversine(curr, unvisited[i]);
-                if (d < minDist) {
-                    minDist = d;
-                    nearestIdx = i;
-                }
-            }
-            let nextPt = unvisited.splice(nearestIdx, 1)[0];
-            ordered.push(nextPt);
-            curr = nextPt;
-        }
-        return ordered;
-    }
-
-    // Ordena todos os pontos em ordem crescente de número da casa
-    const sortedAsc = [...withNum].sort((a, b) => {
-        let numA = a.num !== null ? a.num : 999999;
-        let numB = b.num !== null ? b.num : 999999;
-        return numA - numB;
-    }).map(item => item.point);
-
-    // Identifica qual extremo da rua está mais próximo do ponto de origem do veículo
-    const firstPoint = sortedAsc[0];
-    const lastPoint = sortedAsc[sortedAsc.length - 1];
-
-    const distToFirst = haversine(startPos, firstPoint);
-    const distToLast = haversine(startPos, lastPoint);
-
-    // Se estiver mais perto do final da rua (número maior), percorre em ordem decrescente
-    if (distToLast < distToFirst) {
-        return sortedAsc.reverse();
-    }
-
-    return sortedAsc;
+function normalizeText(str) {
+    return String(str || '').normalize('NFD').replace(/[\u0300-\u036f]/g, '').toLowerCase().replace(/[^a-z0-9\s]/g, '').replace(/\s+/g, ' ').trim();
 }
 
-function groupDeliveriesByStreetBlock(deliveries, startOrigin) {
+function isSimilarStreet(a, b) {
+    if (a === b) return true;
+    if (a.length >= 4 && b.length >= 4) {
+        const dist = levenshteinDistance(a, b);
+        const maxLen = Math.max(a.length, b.length);
+        return dist <= 2 && (1 - dist / maxLen) >= 0.80;
+    }
+    return false;
+}
+
+// Mesma rua em bairros diferentes NÃO é a mesma rua. Pequenos erros de digitação são unificados.
+function assignStreetKeys(items) {
+    const groups = [];
+    items.forEach(it => {
+        const name = normalizeStreetName(it.address);
+        const bairro = normalizeText(it.bairro === '-' ? '' : it.bairro);
+        if (!name) { it.streetKey = ''; return; }
+        let g = groups.find(x => x.bairro === bairro && isSimilarStreet(x.name, name));
+        if (!g) {
+            g = { name, bairro, key: name + '|' + bairro };
+            groups.push(g);
+        }
+        it.streetKey = g.key;
+    });
+}
+
+/* --- PARADAS: pacotes no mesmo ponto viram uma única parada (matriz menor = menos internet) --- */
+
+function groupStops(points) {
+    const stops = [];
+    points.forEach(p => {
+        const s = stops.find(st => haversine(st, p) * 1000 <= SAME_LOCATION_METERS);
+        if (s) s.pts.push(p);
+        else stops.push({ lat: p.lat, lng: p.lng, pts: [p], streetKey: p.streetKey || '' });
+    });
+    return stops;
+}
+
+/* --- ORDENAÇÃO DA ROTA ---
+   Casa e PK2U só entram no cálculo (distância do dia); não são desenhadas.
+   Início fixo na PK2U e fim fixo em Casa. */
+
+async function solveDeliveriesTSP(deliveries, manualFirstIdx, prioritizeSameStreet, onStatus) {
+    lastSolveInfo = null;
     if (!deliveries || deliveries.length === 0) return [];
 
-    const streetGroups = {};
-    deliveries.forEach(p => {
-        const key = p.streetKey || ('single_' + p.id);
-        if (!streetGroups[key]) streetGroups[key] = [];
-        streetGroups[key].push(p);
+    const say = (t) => { if (onStatus) onStatus(t); };
+    const stops = groupStops(deliveries);
+    const locs = [FIXED_PK2U, ...stops, FIXED_HOME];
+
+    say('Calculando tempos de viagem entre as paradas...');
+    const { dur, totalTiles, estimatedTiles } = await buildDurationMatrix(locs, (d, t) => {
+        say(`Calculando tempos de viagem (${d}/${t})...`);
     });
 
-    const unvisitedKeys = Object.keys(streetGroups);
-    const finalRoute = [];
-    let currentPos = startOrigin;
+    const streetKeys = ['__inicio', ...stops.map((s, i) => s.streetKey || ('__avulsa' + i)), '__fim'];
 
-    while (unvisitedKeys.length > 0) {
-        let bestKeyIdx = 0;
-        let minKeyDist = Infinity;
+    let firstFixed = 0;
+    const manualPoint = (manualFirstIdx >= 0 && manualFirstIdx < deliveries.length) ? deliveries[manualFirstIdx] : null;
+    if (manualPoint) firstFixed = stops.findIndex(s => s.pts.includes(manualPoint)) + 1;
 
-        for (let i = 0; i < unvisitedKeys.length; i++) {
-            const key = unvisitedKeys[i];
-            const block = streetGroups[key];
-            const blockMinDist = Math.min(...block.map(p => haversine(currentPos, p)));
-            if (blockMinDist < minKeyDist) {
-                minKeyDist = blockMinDist;
-                bestKeyIdx = i;
-            }
+    say('Definindo a melhor ordem das entregas...');
+    const order = await solveRoute({
+        dur,
+        streetKeys,
+        penalty: prioritizeSameStreet ? SAME_STREET_PENALTY_SEC : 0,
+        firstFixed
+    });
+
+    const result = [];
+    order.forEach(stopIdx => {
+        const stop = stops[stopIdx - 1];
+        const pts = stop.pts.slice();
+        if (manualPoint && pts.includes(manualPoint)) { // o pacote escolhido como 1ª entrega vai primeiro
+            pts.splice(pts.indexOf(manualPoint), 1);
+            pts.unshift(manualPoint);
         }
+        result.push(...pts);
+    });
 
-        const selectedKey = unvisitedKeys.splice(bestKeyIdx, 1)[0];
-        const block = streetGroups[selectedKey];
-        const orderedBlock = sortStreetByHouseNumbers(block, currentPos);
-
-        finalRoute.push(...orderedBlock);
-        if (orderedBlock.length > 0) {
-            currentPos = orderedBlock[orderedBlock.length - 1];
-        }
-    }
-
-    return finalRoute;
-}
-
-/* --- MATRIZ DE DISTÂNCIAS E OTIMIZAÇÃO --- */
-
-async function fetchDistanceMatrixChunk(locations) {
-    if (!navigator.onLine || !locations || locations.length < 2) return null;
-    if (locations.length > 50) return null;
-
-    const coords = locations.map(p => [p.lng, p.lat]);
-
-    try {
-        const controller = new AbortController();
-        const timeoutId = setTimeout(() => controller.abort(), 10000);
-
-        const response = await fetch('https://api.openrouteservice.org/v2/matrix/driving-car', {
-            method: 'POST',
-            headers: {
-                'Authorization': ORS_API_KEY,
-                'Content-Type': 'application/json'
-            },
-            body: JSON.stringify({
-                locations: coords,
-                metrics: ['distance']
-            }),
-            signal: controller.signal
-        });
-        clearTimeout(timeoutId);
-
-        if (!response.ok) return null;
-
-        const data = await response.json();
-        return data && data.distances ? data.distances : null;
-    } catch (e) {
-        console.warn("Falha no lote da matriz ORS. Aplicando fallback por Haversine.", e);
-        return null;
-    }
-}
-
-async function optimizeSingleCluster(clusterPoints, startOrigin, endDestination, prioritizeSameStreet, manualFirstIdx = -1) {
-    if (!clusterPoints || clusterPoints.length === 0) return [];
-    if (clusterPoints.length === 1) return [...clusterPoints];
-
-    if (prioritizeSameStreet) {
-        return groupDeliveriesByStreetBlock(clusterPoints, startOrigin);
-    }
-
-    const clusterLocations = [startOrigin, ...clusterPoints, endDestination];
-    const originIdx = 0;
-    const destIdx = clusterLocations.length - 1;
-
-    const deliveryWithIdx = clusterPoints.map((d, i) => ({ ...d, matrixIdx: i + 1 }));
-    const matrix = await fetchDistanceMatrixChunk(clusterLocations);
-
-    function getRawDist(i, j) {
-        if (matrix && matrix[i] && matrix[i][j] !== null && matrix[i][j] !== undefined) {
-            return matrix[i][j] / 1000.0;
-        }
-        return haversine(clusterLocations[i], clusterLocations[j]);
-    }
-
-    let unvisited = [...deliveryWithIdx];
-    let route = [];
-
-    if (manualFirstIdx >= 0 && manualFirstIdx < unvisited.length) {
-        let first = unvisited.splice(manualFirstIdx, 1)[0];
-        route.push(first);
-    }
-
-    while (unvisited.length > 0) {
-        let currentItem = route.length > 0 ? route[route.length - 1] : null;
-        let currentIdx = currentItem ? currentItem.matrixIdx : originIdx;
-
-        let nearestIdxInUnvisited = 0;
-        let minDist = Infinity;
-
-        for (let i = 0; i < unvisited.length; i++) {
-            let candidate = unvisited[i];
-            let d = getRawDist(currentIdx, candidate.matrixIdx);
-            if (d < minDist) {
-                minDist = d;
-                nearestIdxInUnvisited = i;
-            }
-        }
-
-        route.push(unvisited.splice(nearestIdxInUnvisited, 1)[0]);
-    }
-
-    let improved = true;
-    let count = 0;
-    let startI = (manualFirstIdx >= 0) ? 1 : 0;
-
-    while (improved && count < 50) {
-        improved = false;
-        count++;
-        for (let i = startI; i < route.length - 1; i++) {
-            for (let j = i + 1; j < route.length; j++) {
-                let prevItem = (i === 0) ? null : route[i - 1];
-                let prevIdx = prevItem ? prevItem.matrixIdx : originIdx;
-
-                let nextItem = (j === route.length - 1) ? null : route[j + 1];
-                let nextIdx = nextItem ? nextItem.matrixIdx : destIdx;
-
-                let d1 = getRawDist(prevIdx, route[i].matrixIdx) + getRawDist(route[j].matrixIdx, nextIdx);
-                let d2 = getRawDist(prevIdx, route[j].matrixIdx) + getRawDist(route[i].matrixIdx, nextIdx);
-
-                if (d2 < d1) {
-                    let segment = route.slice(i, j + 1).reverse();
-                    route.splice(i, j - i + 1, ...segment);
-                    improved = true;
-                }
-            }
-        }
-    }
-
-    return route.map(({ matrixIdx, ...rest }) => rest);
-}
-
-function createSpatialClusters(deliveries, maxClusterSize = 40) {
-    let unvisited = [...deliveries];
-    const clusters = [];
-
-    let currentCenter = FIXED_PK2U;
-
-    while (unvisited.length > 0) {
-        let seedIdx = 0;
-        let minSeedDist = Infinity;
-        for (let i = 0; i < unvisited.length; i++) {
-            let d = haversine(currentCenter, unvisited[i]);
-            if (d < minSeedDist) {
-                minSeedDist = d;
-                seedIdx = i;
-            }
-        }
-
-        const cluster = [];
-        let seed = unvisited.splice(seedIdx, 1)[0];
-        cluster.push(seed);
-
-        while (cluster.length < maxClusterSize && unvisited.length > 0) {
-            let lastPoint = cluster[cluster.length - 1];
-            let nearestIdx = 0;
-            let minDist = Infinity;
-
-            for (let i = 0; i < unvisited.length; i++) {
-                let d = haversine(lastPoint, unvisited[i]);
-                if (d < minDist) {
-                    minDist = d;
-                    nearestIdx = i;
-                }
-            }
-
-            cluster.push(unvisited.splice(nearestIdx, 1)[0]);
-        }
-
-        clusters.push(cluster);
-        currentCenter = cluster[cluster.length - 1];
-    }
-
-    return clusters;
-}
-
-async function solveDeliveriesTSP(deliveries, manualFirstIdx, prioritizeSameStreet) {
-    if (!deliveries || deliveries.length === 0) return [];
-
-    let workingDeliveries = [...deliveries];
-
-    // PRÉ-AGRUPAMENTO: Se o usuário definiu a 1ª entrega manual E quer priorizar a mesma rua
-    if (manualFirstIdx >= 0 && manualFirstIdx < workingDeliveries.length && prioritizeSameStreet) {
-        const selectedPoint = workingDeliveries[manualFirstIdx];
-        const targetStreet = selectedPoint.streetKey;
-
-        if (targetStreet) {
-            const sameStreetDeliveries = workingDeliveries.filter(p => p.streetKey === targetStreet);
-            const otherDeliveries = workingDeliveries.filter(p => p.streetKey !== targetStreet);
-
-            const remainingSameStreet = sameStreetDeliveries.filter(p => p.id !== selectedPoint.id);
-            const orderedFirstStreet = [selectedPoint, ...sortStreetByHouseNumbers(remainingSameStreet, selectedPoint)];
-
-            const lastPointFirstStreet = orderedFirstStreet[orderedFirstStreet.length - 1];
-            const optimizedOthers = await solveDeliveriesTSP(otherDeliveries, -1, prioritizeSameStreet);
-
-            return [...orderedFirstStreet, ...optimizedOthers];
-        }
-    }
-
-    if (deliveries.length <= 45) {
-        return await optimizeSingleCluster(deliveries, FIXED_PK2U, FIXED_HOME, prioritizeSameStreet, manualFirstIdx);
-    }
-
-    let manualFirstPoint = null;
-    if (manualFirstIdx >= 0 && manualFirstIdx < workingDeliveries.length) {
-        manualFirstPoint = workingDeliveries.splice(manualFirstIdx, 1)[0];
-    }
-
-    const clusters = createSpatialClusters(workingDeliveries, 40);
-
-    if (manualFirstPoint) {
-        if (clusters.length > 0) {
-            clusters[0].unshift(manualFirstPoint);
-        } else {
-            clusters.push([manualFirstPoint]);
-        }
-    }
-
-    let finalRoute = [];
-    let currentOrigin = FIXED_PK2U;
-
-    for (let c = 0; c < clusters.length; c++) {
-        const isLastCluster = (c === clusters.length - 1);
-        const nextCluster = isLastCluster ? null : clusters[c + 1];
-        const clusterDestination = (nextCluster && nextCluster.length > 0) ? nextCluster[0] : FIXED_HOME;
-        const manualIdxInCluster = (c === 0 && manualFirstPoint) ? 0 : -1;
-
-        const optimizedCluster = await optimizeSingleCluster(
-            clusters[c],
-            currentOrigin,
-            clusterDestination,
-            prioritizeSameStreet,
-            manualIdxInCluster
-        );
-
-        finalRoute.push(...optimizedCluster);
-
-        if (optimizedCluster.length > 0) {
-            currentOrigin = optimizedCluster[optimizedCluster.length - 1];
-        }
-    }
-
-    return finalRoute;
+    lastSolveInfo = { stops: stops.length, packages: deliveries.length, totalTiles, estimatedTiles };
+    return result;
 }
 
 function applyMarkerJitter(points) {
@@ -502,174 +266,235 @@ function applyMarkerJitter(points) {
     });
 }
 
-/* --- BUSCA O TRAÇADO REAL DAS RUAS PARA A ROTA COMPLETA --- */
+/* --- ROTA PLANEJADA: trechos de rua entre as entregas, salvos no aparelho ---
+   Casa -> PK2U -> 1ª entrega e última entrega -> Casa entram só na distância total.
+   Só os trechos entre entregas são desenhados no mapa. */
 
-async function fetchDeliveryPolyline(orderedDeliveries) {
-    if (!orderedDeliveries || orderedDeliveries.length < 2) return null;
-    const allCoordinates = orderedDeliveries.map(p => [p.lng, p.lat]);
+let _legsBusy = false;
 
-    const CHUNK_SIZE = 20;
-    const chunks = [];
+function getPlanWaypoints(points) {
+    return [FIXED_HOME, FIXED_PK2U, ...points.map(p => ({ lat: p.lat, lng: p.lng })), FIXED_HOME];
+}
 
-    for (let i = 0; i < allCoordinates.length - 1; i += (CHUNK_SIZE - 1)) {
-        const chunk = allCoordinates.slice(i, i + CHUNK_SIZE);
-        if (chunk.length >= 2) {
-            chunks.push(chunk);
+function getPlannedFlatCoords() {
+    const flat = [];
+    (plannedLegGeoms || []).forEach(g => {
+        if (g && g.length > 1) {
+            for (let i = flat.length ? 1 : 0; i < g.length; i++) flat.push(g[i]);
         }
-    }
-
-    const promises = chunks.map(async (chunk) => {
-        // 1. Tenta via OSRM Público Primeiro (Sem limite de requisição e sem chave)
-        try {
-            const coordString = chunk.map(c => `${c[0]},${c[1]}`).join(';');
-            const osrmRes = await fetch(`https://router.project-osrm.org/route/v1/driving/${coordString}?overview=full&geometries=geojson`);
-            if (osrmRes.ok) {
-                const osrmData = await osrmRes.json();
-                if (osrmData && osrmData.routes && osrmData.routes[0] && osrmData.routes[0].geometry) {
-                    return osrmData.routes[0].geometry.coordinates;
-                }
-            }
-        } catch (e) {}
-
-        // 2. Fallback via OpenRouteService (com tratamento de erro silencioso)
-        try {
-            const controller = new AbortController();
-            const timeoutId = setTimeout(() => controller.abort(), 5000);
-
-            const res = await fetch('https://api.openrouteservice.org/v2/directions/driving-car/geojson', {
-                method: 'POST',
-                headers: {
-                    'Authorization': ORS_API_KEY,
-                    'Content-Type': 'application/json'
-                },
-                body: JSON.stringify({ coordinates: chunk }),
-                signal: controller.signal
-            });
-            clearTimeout(timeoutId);
-
-            if (res.ok) {
-                const data = await res.json();
-                if (data && data.features && data.features[0] && data.features[0].geometry) {
-                    return data.features[0].geometry.coordinates;
-                }
-            }
-        } catch (e) {}
-
-        // 3. Traçado em linha reta se os serviços falharem
-        return chunk;
     });
-
-    try {
-        const results = await Promise.all(promises);
-        let combinedCoordinates = [];
-
-        results.forEach((coords) => {
-            if (combinedCoordinates.length > 0) {
-                combinedCoordinates.push(...coords.slice(1));
-            } else {
-                combinedCoordinates.push(...coords);
-            }
-        });
-
-        return {
-            'type': 'LineString',
-            'coordinates': combinedCoordinates.length > 0 ? combinedCoordinates : allCoordinates
-        };
-    } catch (err) {
-        return {
-            'type': 'LineString',
-            'coordinates': allCoordinates
-        };
-    }
+    return flat;
 }
 
-/* --- CÁLCULO DA DISTÂNCIA TOTAL DO DIA EM KM --- */
+function updateRouteStatusUI() {
+    const el = document.getElementById('route-status');
+    const btn = document.getElementById('btn-retry-legs');
+    const { total, ready } = routeLegsStatus;
 
-async function fetchFullDayTotalDistance(orderedDeliveries) {
-    if (!orderedDeliveries || orderedDeliveries.length === 0) return '0';
+    if (el) {
+        if (!total) {
+            el.textContent = 'Nenhuma rota calculada.';
+        } else if (ready >= total) {
+            el.innerHTML = `<i class="fa-solid fa-circle-check text-emerald-600 mr-1"></i>Rota completa salva no aparelho (${ready}/${total} trechos). Funciona sem internet.`;
+        } else {
+            el.innerHTML = `<i class="fa-solid fa-triangle-exclamation text-amber-600 mr-1"></i>${ready}/${total} trechos salvos. Conecte-se para completar (linhas tracejadas = pendentes).`;
+        }
+    }
+    if (btn) btn.classList.toggle('hidden', !(total && ready < total));
 
-    const fullCoords = [
-        [FIXED_HOME.lng, FIXED_HOME.lat],
-        [FIXED_PK2U.lng, FIXED_PK2U.lat],
-        ...orderedDeliveries.map(p => [p.lng, p.lat]),
-        [FIXED_HOME.lng, FIXED_HOME.lat]
-    ];
+    const dt = document.getElementById('dist-text');
+    if (dt && total) dt.textContent = `${ready < total ? '≈ ' : ''}${currentRouteDistanceKm} km`;
+}
 
-    const CHUNK_SIZE = 20;
-    const chunks = [];
+// Monta tudo a partir do que está guardado no aparelho (sem internet)
+function refreshPlannedFromCache(points) {
+    const wps = getPlanWaypoints(points);
+    const n = points.length;
+    const totalPairs = wps.length - 1;
+    let sumM = 0, estM = 0, ready = 0;
 
-    for (let i = 0; i < fullCoords.length - 1; i += (CHUNK_SIZE - 1)) {
-        const chunk = fullCoords.slice(i, i + CHUNK_SIZE);
-        if (chunk.length >= 2) {
-            chunks.push(chunk);
+    plannedLegGeoms = new Array(Math.max(0, n - 1)).fill(null);
+    plannedGapSegments = [];
+
+    for (let i = 0; i < totalPairs; i++) {
+        const leg = legCache.get(legKey(wps[i], wps[i + 1]));
+        if (leg) { ready++; sumM += leg.d; }
+        else estM += haversine(wps[i], wps[i + 1]) * 1000 * DETOUR_FACTOR;
+
+        if (i >= 2 && i <= n) { // pares entre entregas (os 3 trechos extras só contam distância)
+            const k = i - 2;
+            if (leg) plannedLegGeoms[k] = leg.c;
+            else plannedGapSegments.push([[wps[i].lng, wps[i].lat], [wps[i + 1].lng, wps[i + 1].lat]]);
         }
     }
 
-    try {
-        const promises = chunks.map(async (chunk) => {
-            try {
-                const controller = new AbortController();
-                const timeoutId = setTimeout(() => controller.abort(), 8000);
-
-                const res = await fetch('https://api.openrouteservice.org/v2/directions/driving-car/geojson', {
-                    method: 'POST',
-                    headers: {
-                        'Authorization': ORS_API_KEY,
-                        'Content-Type': 'application/json'
-                    },
-                    body: JSON.stringify({ coordinates: chunk }),
-                    signal: controller.signal
-                });
-                clearTimeout(timeoutId);
-
-                if (res.ok) {
-                    const data = await res.json();
-                    if (data && data.features && data.features[0] && data.features[0].properties) {
-                        return data.features[0].properties.summary.distance;
-                    }
-                }
-            } catch (e) {}
-
-            try {
-                const coordString = chunk.map(c => `${c[0]},${c[1]}`).join(';');
-                const osrmRes = await fetch(`https://router.project-osrm.org/route/v1/driving/${coordString}?overview=false`);
-                if (osrmRes.ok) {
-                    const osrmData = await osrmRes.json();
-                    if (osrmData && osrmData.routes && osrmData.routes[0]) {
-                        return osrmData.routes[0].distance;
-                    }
-                }
-            } catch (e) {}
-
-            return null;
-        });
-
-        const results = await Promise.all(promises);
-        let totalMeters = 0;
-        let hasSuccess = false;
-
-        results.forEach(dist => {
-            if (dist !== null && !isNaN(dist)) {
-                totalMeters += dist;
-                hasSuccess = true;
-            }
-        });
-
-        if (hasSuccess) {
-            return (totalMeters / 1000).toFixed(1);
-        }
-    } catch (err) {}
-
-    let totalKm = haversine(FIXED_HOME, FIXED_PK2U);
-    totalKm += haversine(FIXED_PK2U, orderedDeliveries[0]);
-    for (let i = 0; i < orderedDeliveries.length - 1; i++) {
-        totalKm += haversine(orderedDeliveries[i], orderedDeliveries[i + 1]);
-    }
-    totalKm += haversine(orderedDeliveries[orderedDeliveries.length - 1], FIXED_HOME);
-    return totalKm.toFixed(1);
+    const flat = getPlannedFlatCoords();
+    currentRouteGeometry = flat.length > 1 ? { type: 'LineString', coordinates: flat } : null;
+    currentRouteDistanceKm = ((sumM + estM) / 1000).toFixed(1);
+    routeLegsStatus = { total: totalPairs, ready };
+    updateRouteStatusUI();
 }
 
-/* --- ATUALIZAR TRAÇADO DO SEGMENTO ATUAL NO MODO NAVEGAÇÃO --- */
+async function buildPlannedRoute(points, showProgress = false) {
+    if (!points || points.length === 0) return;
+    await ensureLegs(getPlanWaypoints(points), (done, total) => {
+        if (showProgress) showLoading(`Baixando ruas para uso offline (${done}/${total} trechos)...`);
+    });
+    refreshPlannedFromCache(points);
+}
+
+// Ao abrir o app: usa o que está salvo e só completa o que faltar se houver internet
+async function restorePlannedRoute() {
+    if (!activePoints || activePoints.length === 0) return;
+    await loadLegsFromStore(getPlanWaypoints(activePoints));
+    refreshPlannedFromCache(activePoints);
+    updateRouteOnMap();
+    if (navigator.onLine && routeLegsStatus.ready < routeLegsStatus.total) retryMissingLegs(false);
+}
+
+async function retryMissingLegs(manual = false) {
+    if (_legsBusy || !activePoints || activePoints.length === 0) return;
+    if (!navigator.onLine) {
+        if (manual) alert('Sem internet no momento. Tente novamente quando houver sinal.');
+        return;
+    }
+    _legsBusy = true;
+    try {
+        if (manual) showLoading('Baixando trechos pendentes...');
+        await buildPlannedRoute(activePoints, manual);
+        updateRouteOnMap();
+    } finally {
+        _legsBusy = false;
+        if (manual) hideLoading();
+    }
+}
+
+/* --- GUIA DE NAVEGAÇÃO (veículo -> próxima entrega) ---
+   1º usa o trecho planejado que já está no aparelho (zero internet).
+   2º só consulta a rede se o veículo realmente saiu da rota, no máximo 1x a cada 20 s,
+      com espera maior depois de falhas.
+   3º sem rede: linha reta TRACEJADA como guia. A rota planejada nunca é alterada. */
+
+function nearestOnLine(coords, lat, lng) {
+    const kLng = Math.cos(lat * Math.PI / 180);
+    const M = 111320;
+    let best = { distM: Infinity, segIdx: 0 };
+    for (let i = 0; i < coords.length - 1; i++) {
+        const ax = (coords[i][0] - lng) * kLng, ay = coords[i][1] - lat;
+        const bx = (coords[i + 1][0] - lng) * kLng, by = coords[i + 1][1] - lat;
+        const dx = bx - ax, dy = by - ay;
+        const len2 = dx * dx + dy * dy;
+        let t = len2 > 0 ? -(ax * dx + ay * dy) / len2 : 0;
+        t = Math.max(0, Math.min(1, t));
+        const px = ax + t * dx, py = ay + t * dy;
+        const d = Math.sqrt(px * px + py * py) * M;
+        if (d < best.distM) best = { distM: d, segIdx: i };
+    }
+    return best;
+}
+
+let _navBusy = false;
+
+async function computeNavGeometry(targetIdx, force = false) {
+    const target = activePoints[targetIdx];
+    if (!target) return;
+    const gps = lastGpsCoords;
+    navGuideIsStraight = false;
+
+    const leg = targetIdx > 0 ? plannedLegGeoms[targetIdx - 1] : null; // trecho planejado: parada anterior -> esta
+
+    if (!gps) { // sem GPS: mostra só o trecho planejado (nunca PK2U -> 1ª entrega)
+        fullNavRouteGeometry = (leg && leg.length > 1) ? { type: 'LineString', coordinates: leg } : null;
+        return;
+    }
+
+    if (leg && leg.length > 1) {
+        const nr = nearestOnLine(leg, gps.lat, gps.lng);
+        if (nr.distM <= NAV_OFFROUTE_METERS) { // está na rota planejada: sem internet
+            fullNavRouteGeometry = { type: 'LineString', coordinates: [[gps.lng, gps.lat], ...leg.slice(nr.segIdx + 1)] };
+            return;
+        }
+    }
+
+    if ((force || Date.now() >= navBlockedUntil) && !_navBusy && navigator.onLine) {
+        _navBusy = true;
+        let res = null;
+        try {
+            res = await getNavRoute({ lat: gps.lat, lng: gps.lng }, { lat: target.lat, lng: target.lng });
+        } catch (e) { res = null; }
+        _navBusy = false;
+
+        if (currentNavIndex !== targetIdx) return; // o destino mudou enquanto consultava
+
+        if (res && res.c && res.c.length > 1) {
+            fullNavRouteGeometry = { type: 'LineString', coordinates: res.c };
+            navFailCount = 0;
+            navBlockedUntil = Date.now() + NAV_MIN_INTERVAL_MS;
+            return;
+        }
+        navFailCount++;
+        navBlockedUntil = Date.now() + Math.min(300000, NAV_MIN_INTERVAL_MS * Math.pow(2, navFailCount - 1));
+    }
+
+    fullNavRouteGeometry = { type: 'LineString', coordinates: [[gps.lng, gps.lat], [target.lng, target.lat]] };
+    navGuideIsStraight = true;
+}
+
+function refreshNavTarget(force) {
+    if (isCustomSearchNav) {
+        if (searchMarker && (force || Date.now() >= navBlockedUntil)) {
+            const ll = searchMarker.getLngLat();
+            navigateToSearchLocation(ll.lat, ll.lng, document.getElementById('nav-next-address').textContent);
+        }
+        return;
+    }
+    const idx = currentNavIndex;
+    computeNavGeometry(idx, force).then(() => { if (currentNavIndex === idx) updateNavLayer(); });
+}
+
+// Chamada a cada posição de GPS (≈1x por segundo) – leve e sem internet na maior parte do tempo
+function onNavGpsUpdate(lat, lng) {
+    if (!isNavMode) return;
+
+    let target = null;
+    if (isCustomSearchNav) {
+        if (searchMarker) { const ll = searchMarker.getLngLat(); target = { lat: ll.lat, lng: ll.lng }; }
+    } else if (currentNavIndex >= 0 && activePoints[currentNavIndex]) {
+        target = activePoints[currentNavIndex];
+    }
+    if (!target) return;
+
+    const here = { lat, lng };
+    const dTarget = haversine(here, target) * 1000;
+
+    if (isFallbackOrigin) { // navegação começou antes do primeiro sinal de GPS
+        isFallbackOrigin = false;
+        refreshNavTarget(true);
+        return;
+    }
+
+    const geom = (fullNavRouteGeometry && !navGuideIsStraight) ? fullNavRouteGeometry.coordinates : null;
+    if (geom && geom.length > 1) {
+        const nr = nearestOnLine(geom, lat, lng);
+        if (nr.distM <= NAV_OFFROUTE_METERS || dTarget <= NAV_ARRIVED_METERS) {
+            fullNavRouteGeometry = { type: 'LineString', coordinates: [[lng, lat], ...geom.slice(nr.segIdx + 1)] };
+            updateNavLayer();
+            return;
+        }
+    }
+
+    if (dTarget <= NAV_ARRIVED_METERS || navGuideIsStraight) { // guia curto/sem rede acompanha o veículo
+        fullNavRouteGeometry = { type: 'LineString', coordinates: [[lng, lat], [target.lng, target.lat]] };
+        navGuideIsStraight = true;
+        updateNavLayer();
+        if (dTarget <= NAV_ARRIVED_METERS) return;
+    }
+
+    const now = Date.now();
+    if (now - lastRecalcTime < 3000) return;
+    lastRecalcTime = now;
+    refreshNavTarget(false);
+}
 
 async function updateNavSegmentRoute(forceIdx = null) {
     if (!activePoints || activePoints.length === 0) return;
@@ -679,8 +504,8 @@ async function updateNavSegmentRoute(forceIdx = null) {
     document.getElementById('nav-delivery-actions').classList.remove('hidden');
     document.getElementById('nav-next-label').textContent = 'Próximo Destino';
 
-    let nextIdx = (typeof forceIdx === 'number' && forceIdx >= 0 && forceIdx < activePoints.length) 
-        ? forceIdx 
+    let nextIdx = (typeof forceIdx === 'number' && forceIdx >= 0 && forceIdx < activePoints.length)
+        ? forceIdx
         : activePoints.findIndex(p => p.status === 'pending');
 
     if (nextIdx === -1) {
@@ -697,11 +522,12 @@ async function updateNavSegmentRoute(forceIdx = null) {
     const targetPoint = activePoints[nextIdx];
     if (!targetPoint) return;
 
-    const sameAddressPoints = activePoints.filter((p, i) => i >= nextIdx && p.status === 'pending' && p.streetKey === targetPoint.streetKey);
+    const sameAddressPoints = activePoints.filter((p, i) => i >= nextIdx && p.status === 'pending' &&
+        (p === targetPoint || (targetPoint.streetKey && p.streetKey === targetPoint.streetKey)));
 
     document.getElementById('nav-next-num').textContent = `${nextIdx + 1}`;
     document.getElementById('nav-next-title').textContent = `${targetPoint.spx}${sameAddressPoints.length > 1 ? ` (+${sameAddressPoints.length - 1} nessa rua)` : ''}`;
-    
+
     const pkgCountPrefix = sameAddressPoints.length > 1 ? `(${sameAddressPoints.length}) ` : '';
     document.getElementById('nav-next-address').textContent = `${pkgCountPrefix}${targetPoint.address} - ${targetPoint.bairro}`;
 
@@ -715,7 +541,7 @@ async function updateNavSegmentRoute(forceIdx = null) {
 
     const houseNumEl = document.getElementById('nav-next-house-num');
     if (houseNumEl) {
-        if (nextPendingPoint && nextPendingPoint.streetKey === targetPoint.streetKey) {
+        if (nextPendingPoint && targetPoint.streetKey && nextPendingPoint.streetKey === targetPoint.streetKey) {
             const num = extractHouseNumber(nextPendingPoint.address);
             if (num) {
                 houseNumEl.innerHTML = `Próx. n.: <span class="text-sm sm:text-base font-extrabold text-amber-200 ml-0.5">${num}</span>`;
@@ -730,68 +556,14 @@ async function updateNavSegmentRoute(forceIdx = null) {
         }
     }
 
-    let startCoord;
-    if (lastGpsCoords) {
-        startCoord = [lastGpsCoords.lng, lastGpsCoords.lat];
-        isFallbackOrigin = false;
-    } else {
-        startCoord = (nextIdx > 0 ? [activePoints[nextIdx - 1].lng, activePoints[nextIdx - 1].lat] : [FIXED_PK2U.lng, FIXED_PK2U.lat]);
-        isFallbackOrigin = true;
-    }
-
-    const endCoord = [targetPoint.lng, targetPoint.lat];
-    let routeFound = false;
-
-    try {
-        const controller = new AbortController();
-        const timeoutId = setTimeout(() => controller.abort(), 6000);
-
-        const response = await fetch('https://api.openrouteservice.org/v2/directions/driving-car/geojson', {
-            method: 'POST',
-            headers: {
-                'Authorization': ORS_API_KEY,
-                'Content-Type': 'application/json'
-            },
-            body: JSON.stringify({ coordinates: [startCoord, endCoord] }),
-            signal: controller.signal
-        });
-        clearTimeout(timeoutId);
-
-        if (response.ok) {
-            const data = await response.json();
-            if (data && data.features && data.features[0] && data.features[0].geometry) {
-                fullNavRouteGeometry = data.features[0].geometry;
-                currentRouteGeometry = JSON.parse(JSON.stringify(fullNavRouteGeometry));
-                routeFound = true;
-            }
-        }
-    } catch (err) {}
-
-    if (!routeFound) {
-        try {
-            const osrmUrl = `https://router.project-osrm.org/route/v1/driving/${startCoord[0]},${startCoord[1]};${endCoord[0]},${endCoord[1]}?overview=full&geometries=geojson`;
-            const osrmRes = await fetch(osrmUrl);
-            if (osrmRes.ok) {
-                const osrmData = await osrmRes.json();
-                if (osrmData && osrmData.routes && osrmData.routes[0] && osrmData.routes[0].geometry) {
-                    fullNavRouteGeometry = osrmData.routes[0].geometry;
-                    currentRouteGeometry = JSON.parse(JSON.stringify(fullNavRouteGeometry));
-                    routeFound = true;
-                }
-            }
-        } catch (e) {}
-    }
-
-    if (!routeFound) {
-        fullNavRouteGeometry = { 'type': 'LineString', 'coordinates': [startCoord, endCoord] };
-        currentRouteGeometry = JSON.parse(JSON.stringify(fullNavRouteGeometry));
-    }
-
+    isFallbackOrigin = !lastGpsCoords;
+    await computeNavGeometry(nextIdx, true);
     updateRouteOnMap();
 
     if (map) {
+        const center = lastGpsCoords ? [lastGpsCoords.lng, lastGpsCoords.lat] : [targetPoint.lng, targetPoint.lat];
         map.flyTo({
-            center: startCoord,
+            center,
             pitch: is3DMode ? 60 : 0,
             padding: getNavPadding(),
             duration: 800
@@ -902,6 +674,13 @@ function handleFile(file) {
     currentRouteGeometry = null;
     fullNavRouteGeometry = null;
     currentRouteDistanceKm = '0';
+    plannedLegGeoms = [];
+    plannedGapSegments = [];
+    routeLegsStatus = { total: 0, ready: 0 };
+    routeIsOptimized = false;
+    legCache.clear();
+    Store.clearPrefix('leg:');
+    updateRouteStatusUI();
     updateRouteOnMap();
     document.getElementById('dist-badge').classList.add('hidden');
     document.getElementById('file-summary-card').classList.add('hidden');
@@ -979,6 +758,8 @@ function parseAndValidateData(json) {
         }
     });
 
+    assignStreetKeys(rawData);
+
     if (rawData.length === 0) {
         alert("Nenhuma coordenada válida encontrada na planilha! Verifique se as colunas Latitude e Longitude estão preenchidas.");
         return;
@@ -1007,17 +788,40 @@ async function optimizeAndDrawRoute() {
         alert("Carregue uma planilha XLSX antes de otimizar a rota.");
         return;
     }
+    if (isNavMode) {
+        alert("Saia do modo navegação antes de otimizar a rota.");
+        return;
+    }
+
+    // Proteção da numeração: os pacotes já estão etiquetados/separados pela ordem atual
+    if (routeIsOptimized) {
+        const hasProgress = activePoints.some(p => p.status !== 'pending');
+        const msg = hasProgress
+            ? "ATENÇÃO: a rota já está em andamento.\n\nOtimizar de novo pode MUDAR A NUMERAÇÃO dos pacotes e eles deixarão de bater com a ordem que você já separou.\n\nTem certeza que deseja continuar?"
+            : "Esta rota já foi otimizada.\n\nOtimizar de novo pode mudar a numeração dos pacotes que você já separou.\n\nDeseja continuar?";
+        if (!confirm(msg)) return;
+    }
+
+    if (!navigator.onLine) {
+        const ok = confirm("Sem internet: a ordem será calculada por estimativa em linha reta (menos precisa) e as ruas não poderão ser baixadas.\n\nO ideal é otimizar com internet, antes de sair.\n\nContinuar mesmo assim?");
+        if (!ok) return;
+    }
 
     showLoading("Otimizando e agrupando entregas por rua...");
-    
+
     try {
         const firstIdx = parseInt(document.getElementById('start-point-select').value);
         const prioritizeSameStreet = document.getElementById('prioritize-same-street').checked;
 
-        activePoints = await solveDeliveriesTSP(rawData, firstIdx, prioritizeSameStreet);
+        activePoints = await solveDeliveriesTSP(rawData, firstIdx, prioritizeSameStreet, showLoading);
+        routeIsOptimized = true;
         await renderMapAndUI(activePoints, true);
 
         document.getElementById('btn-qrcode-scan').disabled = false;
+
+        if (lastSolveInfo && lastSolveInfo.estimatedTiles > 0) {
+            alert("Parte dos tempos de viagem foi estimada em linha reta por falta de internet. A ordem pode ficar menos precisa.");
+        }
     } catch (err) {
         console.error("Erro na otimização:", err);
         alert("Erro ao otimizar a rota: " + err.message);
@@ -1114,11 +918,12 @@ function exportToGPX() {
     });
     gpxContent += `  </rte>\n`;
 
-    if (currentRouteGeometry && currentRouteGeometry.coordinates && currentRouteGeometry.coordinates.length > 0) {
+    const trackCoords = getPlannedFlatCoords();
+    if (trackCoords.length > 0) {
         gpxContent += `\n  <trk>\n`;
         gpxContent += `    <name>Tracado das Ruas</name>\n`;
         gpxContent += `    <trkseg>\n`;
-        currentRouteGeometry.coordinates.forEach(coord => {
+        trackCoords.forEach(coord => {
             gpxContent += `      <trkpt lat="${coord[1]}" lon="${coord[0]}"></trkpt>\n`;
         });
         gpxContent += `    </trkseg>\n`;

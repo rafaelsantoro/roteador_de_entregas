@@ -45,11 +45,15 @@ function saveStateToLocalStorage() {
         activePoints: activePoints,
         startIdx: document.getElementById('start-point-select').value,
         prioritizeSameStreet: document.getElementById('prioritize-same-street').checked,
-        routeGeometry: currentRouteGeometry,
+        optimized: routeIsOptimized,
         routeDistanceKm: currentRouteDistanceKm
     };
 
-    localStorage.setItem(STORAGE_KEY, JSON.stringify(state));
+    try {
+        localStorage.setItem(STORAGE_KEY, JSON.stringify(state));
+    } catch (e) {
+        console.warn('Não foi possível salvar o estado local:', e);
+    }
 }
 
 function loadStateFromLocalStorage() {
@@ -62,7 +66,7 @@ function loadStateFromLocalStorage() {
 
         rawData = state.rawData || [];
         activePoints = state.activePoints || [];
-        currentRouteGeometry = state.routeGeometry || null;
+        routeIsOptimized = !!state.optimized || !!state.routeGeometry; // estados antigos tinham routeGeometry
         currentRouteDistanceKm = state.routeDistanceKm || '0';
 
         populateSelect(rawData);
@@ -80,7 +84,7 @@ function loadStateFromLocalStorage() {
         document.getElementById('btn-export-gpx').disabled = false;
         document.getElementById('btn-export').disabled = false;
 
-        if (currentRouteGeometry && activePoints.length > 0) {
+        if (routeIsOptimized && activePoints.length > 0) {
             document.getElementById('btn-qrcode-scan').disabled = false;
         }
 
@@ -89,6 +93,7 @@ function loadStateFromLocalStorage() {
 
         if (activePoints.length > 0) {
             updateRouteOnMap();
+            restorePlannedRoute(); // lê os trechos salvos no aparelho; só usa internet se faltar algum
             document.getElementById('dist-badge').classList.remove('hidden');
             document.getElementById('dist-text').textContent = `${currentRouteDistanceKm} km`;
         }
@@ -119,6 +124,7 @@ document.addEventListener('DOMContentLoaded', () => {
     checkInternetConnection();
     window.addEventListener('online', checkInternetConnection);
     window.addEventListener('offline', checkInternetConnection);
+    window.addEventListener('online', () => setTimeout(() => retryMissingLegs(false), 2500));
 
     if (window.location.protocol === 'file:') {
         const warnBox = document.getElementById('file-protocol-warning');
