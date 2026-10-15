@@ -20,7 +20,10 @@
 
     <!-- Scripts Modulares JS (A criar nos próximos passos) -->
     <script src="js/config.js" defer></script>
+    <script src="js/store.js" defer></script>
     <script src="js/ui.js" defer></script>
+    <script src="js/net.js" defer></script>
+    <script src="js/solver.js" defer></script>
     <script src="js/map.js" defer></script>
     <script src="js/router.js" defer></script>
     <script src="js/qr-scanner.js" defer></script>
@@ -60,7 +63,7 @@
     <div id="offline-warning" class="hidden bg-rose-600 text-white text-xs font-bold px-3 py-2 flex items-center justify-between shrink-0 z-30 shadow-lg">
         <div class="flex items-center space-x-2">
             <i class="fa-solid fa-wifi-slash text-base animate-pulse"></i>
-            <span>Atenção: Você está offline! Conecte-se à internet para calcular rotas e carregar os mapas.</span>
+            <span>Sem internet: a rota já baixada e o mapa salvo continuam funcionando. Novas rotas e mapas precisam de conexão.</span>
         </div>
         <button onclick="document.getElementById('offline-warning').classList.add('hidden')" class="text-white font-bold px-2">✕</button>
     </div>
@@ -185,6 +188,15 @@
 					    <button onclick="downloadAvareUrbanMap()" class="w-full bg-slate-800 hover:bg-slate-700 active:scale-95 text-amber-400 font-bold text-xs py-2.5 px-3 rounded-xl border border-slate-700 flex items-center justify-center space-x-2 transition shadow-sm">
 					        <i class="fa-solid fa-cloud-arrow-down text-sm"></i>
 					        <span>Baixar Avaré Offline</span>
+					    </button>
+					</div>
+					<!-- Estado da rota salva no aparelho -->
+					<div class="pt-2 border-t border-slate-800 mt-3">
+					    <label class="text-[10px] uppercase font-bold text-slate-400 block mb-1.5">Rota offline</label>
+					    <div id="route-status" class="text-[11px] text-slate-600 leading-snug mb-1.5">Nenhuma rota calculada.</div>
+					    <button id="btn-retry-legs" onclick="retryMissingLegs(true)" class="hidden w-full bg-amber-500 hover:bg-amber-600 active:scale-95 text-slate-950 font-bold text-xs py-2 px-3 rounded-xl flex items-center justify-center space-x-2 transition shadow-sm">
+					        <i class="fa-solid fa-cloud-arrow-down text-sm"></i>
+					        <span>Baixar trechos pendentes</span>
 					    </button>
 					</div>
                 </div>

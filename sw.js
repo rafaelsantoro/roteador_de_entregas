@@ -1,64 +1,76 @@
-const CACHE_NAME = 'roteador-entregas-v1';
+// Para publicar uma nova versão do app: aumente este número (v3, v4...)
+const CACHE_NAME = 'roteador-entregas-v2';
 const TILE_CACHE_NAME = 'map-tiles-cache';
 
-// Lista de arquivos para salvar no celular (App Shell)
+// Todos os arquivos do app: depois da 1ª abertura com internet, ele abre 100% offline
 const ASSETS_TO_CACHE = [
   './',
   './index.html',
+  './manifest.json',
+  './icon.jpg',
+  './css/styles.css',
+  './js/config.js',
+  './js/store.js',
+  './js/ui.js',
+  './js/net.js',
+  './js/solver.js',
+  './js/map.js',
+  './js/router.js',
+  './js/qr-scanner.js',
+  './js/app.js',
   './lib/tailwindcss.js',
   './lib/maplibre-gl.css',
   './lib/maplibre-gl.js',
   './lib/xlsx.full.min.js',
-  './lib/fontawesome/all.min.css'
+  './lib/html5-qrcode.min.js',
+  './lib/fontawesome/all.min.css',
+  './lib/webfonts/fa-solid-900.woff2',
+  './lib/webfonts/fa-regular-400.woff2',
+  './lib/webfonts/fa-brands-400.woff2',
+  './lib/webfonts/fa-v4compatibility.woff2'
 ];
 
-// Instalação do Service Worker e gravação do cache inicial
+// Instalação: salva cada arquivo separadamente (um arquivo ausente não derruba os outros)
 self.addEventListener('install', (event) => {
   event.waitUntil(
-    caches.open(CACHE_NAME).then((cache) => {
-      return cache.addAll(ASSETS_TO_CACHE);
-    })
+    caches.open(CACHE_NAME).then((cache) =>
+      Promise.all(ASSETS_TO_CACHE.map((url) =>
+        cache.add(new Request(url, { cache: 'reload' })).catch(() => {})
+      ))
+    )
   );
   self.skipWaiting();
 });
 
-// Ativação e limpeza de caches antigos (preservando o cache de tiles)
+// Ativação: apaga versões antigas do app (preserva o cache de mapas)
 self.addEventListener('activate', (event) => {
   event.waitUntil(
-    caches.keys().then((keys) => {
-      return Promise.all(
-        keys.map((key) => {
-          if (key !== CACHE_NAME && key !== TILE_CACHE_NAME) {
-            return caches.delete(key);
-          }
-        })
-      );
-    })
+    caches.keys().then((keys) =>
+      Promise.all(keys.map((key) => {
+        if (key !== CACHE_NAME && key !== TILE_CACHE_NAME) return caches.delete(key);
+      }))
+    )
   );
   self.clients.claim();
 });
 
-// Interceptação das requisições
 self.addEventListener('fetch', (event) => {
-  const requestUrl = new URL(event.request.url);
+  const req = event.request;
+  if (req.method !== 'GET') return;
 
-  // 1. Interceptação de Tiles do OpenStreetMap (Grava automaticamente qualquer rota/rua percorrida)
-  if (requestUrl.hostname.includes('tile.openstreetmap.org')) {
+  const url = new URL(req.url);
+
+  // 1. Tiles do mapa: usa o que está salvo; o que for visto online passa a ficar salvo
+  if (url.hostname.includes('tile.openstreetmap.org')) {
     event.respondWith(
       caches.open(TILE_CACHE_NAME).then(async (cache) => {
-        const cachedResponse = await cache.match(event.request);
-        if (cachedResponse) {
-          return cachedResponse; // Retorna do cache local se já tiver sido percorrido ou baixado antes
-        }
-
+        const cached = await cache.match(req);
+        if (cached) return cached;
         try {
-          const networkResponse = await fetch(event.request);
-          if (networkResponse && networkResponse.status === 200) {
-            cache.put(event.request, networkResponse.clone()); // Salva automaticamente a imagem do novo trecho percorrido
-          }
-          return networkResponse;
-        } catch (error) {
-          // Se estiver offline e o tile nunca tiver sido visto, evita erros de rede no console
+          const net = await fetch(req);
+          if (net && net.status === 200) cache.put(req, net.clone());
+          return net;
+        } catch (e) {
           return new Response('', { status: 408, statusText: 'Tile offline indisponível' });
         }
       })
@@ -66,13 +78,32 @@ self.addEventListener('fetch', (event) => {
     return;
   }
 
-  // 2. Estratégia Padrão (Cache-First) para os restantes arquivos da aplicação (HTML, CSS, JS)
-  event.respondWith(
-    caches.match(event.request).then((cachedResponse) => {
-      if (cachedResponse) {
-        return cachedResponse;
-      }
-      return fetch(event.request);
-    })
-  );
+  // 2. Arquivos do próprio app: abre na hora pelo cache e atualiza em segundo plano quando há internet
+  if (url.origin === self.location.origin) {
+    event.respondWith(
+      caches.open(CACHE_NAME).then(async (cache) => {
+        const cached = await cache.match(req, { ignoreSearch: true });
+
+        const refresh = fetch(req, { cache: 'no-cache' })
+          .then((net) => {
+            if (net && net.status === 200) cache.put(req, net.clone());
+            return net;
+          })
+          .catch(() => null);
+
+        if (cached) {
+          event.waitUntil(refresh);
+          return cached;
+        }
+        const net = await refresh;
+        if (net) return net;
+        if (req.mode === 'navigate') {
+          const home = await cache.match('./index.html');
+          if (home) return home;
+        }
+        return new Response('', { status: 503, statusText: 'Offline' });
+      })
+    );
+  }
+  // 3. Qualquer outro endereço (OSRM, ORS, etc.): não interfere
 });
