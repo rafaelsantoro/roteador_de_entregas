@@ -1,4 +1,4 @@
-const CACHE_NAME = 'roteador-entregas-v1';
+const CACHE_NAME = 'roteador-entregas-v3';
 const TILE_CACHE_NAME = 'map-tiles-cache';
 
 // Lista de arquivos para salvar no celular (App Shell)
