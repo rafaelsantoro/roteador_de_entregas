@@ -63,31 +63,26 @@ self.addEventListener('fetch', (event) => {
 
   const url = new URL(req.url);
 
-	// 1. Tiles do mapa (CARTO / OSM): usa o que está salvo; o que for visto online passa a ficar salvo
-	if (url.hostname.includes('cartocdn.com') || url.hostname.includes('tile.openstreetmap.org')) {
-	  event.respondWith(
-		caches.open(TILE_CACHE_NAME).then(async (cache) => {
-		  const cached = await cache.match(req, { ignoreSearch: true });
-		  if (cached) return cached;
-		  try {
-			const net = await fetch(req);
-			if (net && net.status === 200) {
-			  // Await com try/catch evita unhandled promise rejection caso o armazenamento falhe
-			  try {
-				await cache.put(req, net.clone());
-			  } catch (cacheErr) {
-				console.warn('Aviso: não foi possível salvar o tile no cache:', cacheErr);
-			  }
-			}
-			return net;
-		  } catch (e) {
-			// Retornar 404 evita que o MapLibre GL estoure exceções no Service Worker
-			return new Response('', { status: 404, statusText: 'Tile indisponível offline' });
-		  }
-		})
-	  );
-	  return;
-	}
+// 1. Tiles do mapa (CARTO / OSM): usa o que está salvo; o que for visto online fica salvo
+if (url.hostname.includes('cartocdn.com') || url.hostname.includes('tile.openstreetmap.org')) {
+  event.respondWith(
+    caches.open(TILE_CACHE_NAME).then(async (cache) => {
+      const cached = await cache.match(req, { ignoreSearch: true });
+      if (cached) return cached;
+      try {
+        const net = await fetch(req);
+        if (net && net.status === 200) {
+          try { await cache.put(req, net.clone()); } catch (e) {}
+        }
+        return net;
+      } catch (e) {
+        // Retorna 404 em vez de lançar exceção de rede
+        return new Response('', { status: 404, statusText: 'Tile offline indisponível' });
+      }
+    })
+  );
+  return;
+}
 
   // 2. Arquivos do próprio app: abre na hora pelo cache e atualiza em segundo plano quando há internet
   if (url.origin === self.location.origin) {
