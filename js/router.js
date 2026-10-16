@@ -765,7 +765,7 @@ function parseAndValidateData(json) {
                 bairro: String(bairro || '-').trim(),
                 lat: lat,
                 lng: lng,
-                status: 'pending'
+                status: 'pending',
 				scanned: false // Indica se o pacote foi conferido via QR Code
             });
         } else {
