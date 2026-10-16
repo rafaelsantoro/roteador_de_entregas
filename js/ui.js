@@ -1,5 +1,12 @@
 /* --- INTERFACE E ELEMENTOS VISUAIS --- */
 
+// Escapa texto vindo da planilha/internet antes de colocá-lo em HTML (evita injeção de código)
+function escapeHtml(value) {
+    return String(value == null ? '' : value).replace(/[&<>"']/g, c => ({
+        '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;'
+    }[c]));
+}
+
 function checkInternetConnection() {
     const offlineBanner = document.getElementById('offline-warning');
     if (!offlineBanner) return;
@@ -68,7 +75,7 @@ function switchMobileTab(tab) {
         setTimeout(() => {
             if (map) {
                 map.resize();
-                if (activePoints.length > 0 && !isNavMode) {
+                if (activePoints.length > 0 && !isNavMode && Date.now() >= suppressFitUntil) {
                     const bounds = new maplibregl.LngLatBounds();
                     activePoints.forEach(p => bounds.extend([p.lng, p.lat]));
                     map.fitBounds(bounds, { padding: 40 });
@@ -110,9 +117,9 @@ function renderSidebarList(points) {
                         ${isSuccess ? '<i class="fa-solid fa-check"></i>' : isOccurrence ? '<i class="fa-solid fa-xmark"></i>' : idx + 1}
                     </div>
                     <div class="min-w-0">
-                        <p class="text-xs font-bold text-slate-900 truncate tracking-tight">${p.spx}</p>
-                        <p class="text-[11px] font-semibold text-slate-700 truncate leading-snug mt-0.5">${p.address}</p>
-                        <p class="text-[10px] font-medium text-slate-500 truncate mt-0.5"><i class="fa-solid fa-location-dot text-slate-400 mr-1"></i>${p.bairro}</p>
+                        <p class="text-xs font-bold text-slate-900 truncate tracking-tight">${escapeHtml(p.spx)}</p>
+                        <p class="text-[11px] font-semibold text-slate-700 truncate leading-snug mt-0.5">${escapeHtml(p.address)}</p>
+                        <p class="text-[10px] font-medium text-slate-500 truncate mt-0.5"><i class="fa-solid fa-location-dot text-slate-400 mr-1"></i>${escapeHtml(p.bairro)}</p>
                     </div>
                 </div>
             </div>
@@ -122,11 +129,11 @@ function renderSidebarList(points) {
                     <i class="fa-solid fa-compass"></i>
                     <span>App</span>
                 </button>
-                <button onclick="openWaze(${p.lat}, ${p.lng})" class="py-1.5 px-1 bg-cyan-500 hover:bg-cyan-600 text-white rounded-lg text-[11px] font-bold transition flex items-center justify-center space-x-1 shadow-sm">
+                <button onclick="openWaze(${Number(p.lat)}, ${Number(p.lng)})" class="py-1.5 px-1 bg-cyan-500 hover:bg-cyan-600 text-white rounded-lg text-[11px] font-bold transition flex items-center justify-center space-x-1 shadow-sm">
                     <i class="fa-solid fa-location-arrow"></i>
                     <span>Waze</span>
                 </button>
-                <button onclick="openGoogleMaps(${p.lat}, ${p.lng})" class="py-1.5 px-1 bg-blue-600 hover:bg-blue-700 text-white rounded-lg text-[11px] font-bold transition flex items-center justify-center space-x-1 shadow-sm">
+                <button onclick="openGoogleMaps(${Number(p.lat)}, ${Number(p.lng)})" class="py-1.5 px-1 bg-blue-600 hover:bg-blue-700 text-white rounded-lg text-[11px] font-bold transition flex items-center justify-center space-x-1 shadow-sm">
                     <i class="fa-brands fa-google"></i>
                     <span>G. Maps</span>
                 </button>

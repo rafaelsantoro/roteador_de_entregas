@@ -31,6 +31,54 @@ function setupEvents() {
     document.getElementById('btn-optimize').addEventListener('click', optimizeAndDrawRoute);
     document.getElementById('btn-export-gpx').addEventListener('click', exportToGPX);
     document.getElementById('btn-export').addEventListener('click', exportToXLSX);
+
+    initLocalSettingsUI();
+}
+
+/* --- CONFIGURAÇÕES DO APARELHO (chave de API e Casa ficam só no localStorage, fora do GitHub) --- */
+
+function initLocalSettingsUI() {
+    const s = loadLocalSettings();
+    const keyEl = document.getElementById('setting-ors-key');
+    const homeEl = document.getElementById('setting-home');
+    if (keyEl) keyEl.value = s.orsKey || '';
+    if (homeEl && s.home) homeEl.value = `${s.home.lat}, ${s.home.lng}`;
+
+    const st = document.getElementById('setting-status');
+    if (st) {
+        const orsTxt = ORS_PROXY_URL ? 'ORS via proxy' : (getOrsKey() ? 'chave ORS salva no aparelho' : 'sem chave ORS (usando só OSRM)');
+        const homeTxt = (s.home && isFinite(s.home.lat)) ? 'Casa definida no aparelho' : 'Casa padrão do config.js';
+        st.textContent = `${orsTxt} · ${homeTxt}`;
+    }
+}
+
+function saveLocalSettingsFromUI() {
+    const key = (document.getElementById('setting-ors-key').value || '').trim();
+    const homeTxt = (document.getElementById('setting-home').value || '').trim();
+    const patch = { orsKey: key, home: null };
+
+    if (homeTxt) {
+        const parts = homeTxt.replace(/;/g, ',').split(/[,\s]+/).filter(Boolean);
+        const lat = parseFloat(parts[0]);
+        const lng = parseFloat(parts[1]);
+        if (parts.length < 2 || !isFinite(lat) || !isFinite(lng) || Math.abs(lat) > 90 || Math.abs(lng) > 180) {
+            alert('Casa: informe "latitude, longitude" com ponto decimal (ex.: -23.0864, -48.9187).');
+            return;
+        }
+        patch.home = { lat, lng };
+    }
+
+    saveLocalSettings(patch);
+    alert('Configurações salvas neste aparelho. O app será recarregado para aplicar.');
+    location.reload();
+}
+
+async function clearLocalData() {
+    if (!confirm('Apagar deste aparelho a planilha, a rota salva e os trechos de rua baixados?\n\nA chave de API e a Casa (configurações) serão mantidas.')) return;
+    localStorage.removeItem(STORAGE_KEY);
+    await Store.clearPrefix('leg:');
+    await Store.clearPrefix('mx:');
+    location.reload();
 }
 
 function setupDeviceOrientation() {
@@ -94,8 +142,7 @@ function loadStateFromLocalStorage() {
         if (activePoints.length > 0) {
             updateRouteOnMap();
             restorePlannedRoute(); // lê os trechos salvos no aparelho; só usa internet se faltar algum
-            document.getElementById('dist-badge').classList.remove('hidden');
-            document.getElementById('dist-text').textContent = `${currentRouteDistanceKm} km`;
+            updateRouteSummaryUI(); // km e tempo na barra superior (valor salvo, antes mesmo dos trechos carregarem)
         }
     } catch (e) {
         console.error("Erro local storage:", e);
@@ -163,6 +210,11 @@ map = new maplibregl.Map({
     });
 
     map.addControl(new maplibregl.NavigationControl({ showCompass: false }), 'bottom-right');
+
+    // Se você arrastar ou der zoom, a câmera para de seguir o GPS por 10 s (dá tempo de olhar o mapa)
+    const pauseFollow = (ev) => { if (ev && ev.originalEvent) followPausedUntil = Date.now() + FOLLOW_PAUSE_MS; };
+    map.on('dragstart', pauseFollow);
+    map.on('zoomstart', pauseFollow);
 
     map.on('style.load', () => {
         isTextBoosted = false;

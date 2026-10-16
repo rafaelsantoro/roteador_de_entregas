@@ -302,22 +302,34 @@ function updateRouteStatusUI() {
     }
     if (btn) btn.classList.toggle('hidden', !(total && ready < total));
 
-    const dt = document.getElementById('dist-text');
-    if (dt && total) {
-        // Cálculo do tempo estimado
-        const totalPackages = activePoints ? activePoints.length : 0;
-        const deliveryTimeMinutes = totalPackages * 1; // 1 minuto por pacote
+    updateRouteSummaryUI();
+}
 
-        // Estima o tempo de direção (se não houver matriz, usa 25 km/h)
-        const driveTimeMinutes = Math.round((parseFloat(currentRouteDistanceKm) / AVG_SPEED_KMH) * 60);
-        const totalMinutes = driveTimeMinutes + deliveryTimeMinutes;
+// Quilometragem e tempo estimado do dia: ficam FIXOS na barra superior, em qualquer tela
+function getRouteTimeMinutes() {
+    const km = parseFloat(currentRouteDistanceKm) || 0;
+    const driveMin = Math.round((km / AVG_SPEED_KMH) * 60);
+    const deliveryMin = (activePoints ? activePoints.length : 0) * DELIVERY_MIN_PER_PACKAGE;
+    return driveMin + deliveryMin;
+}
 
-        const hours = Math.floor(totalMinutes / 60);
-        const mins = totalMinutes % 60;
-        const timeFormatted = hours > 0 ? `${hours}h ${mins}min` : `${mins} min`;
+function updateRouteSummaryUI() {
+    const box = document.getElementById('route-summary');
+    const txt = document.getElementById('route-summary-text');
+    if (!box || !txt) return;
 
-        dt.textContent = `${ready < total ? '≈ ' : ''}${currentRouteDistanceKm} km | ⏱️ ${timeFormatted}`;
-    }
+    const km = parseFloat(currentRouteDistanceKm) || 0;
+    const hasRoute = !!(activePoints && activePoints.length > 0 && routeIsOptimized && km > 0);
+    box.classList.toggle('hidden', !hasRoute);
+    if (!hasRoute) return;
+
+    const approx = routeLegsStatus.total > 0 && routeLegsStatus.ready < routeLegsStatus.total;
+    const totalMinutes = getRouteTimeMinutes();
+    const hours = Math.floor(totalMinutes / 60);
+    const mins = totalMinutes % 60;
+    const timeFormatted = hours > 0 ? `${hours}h ${String(mins).padStart(2, '0')}min` : `${mins} min`;
+
+    txt.textContent = `${approx ? '≈ ' : ''}${currentRouteDistanceKm} km · ${timeFormatted}`;
 }
 
 // Monta tudo a partir do que está guardado no aparelho (sem internet)
@@ -409,32 +421,40 @@ function nearestOnLine(coords, lat, lng) {
 
 let _navBusy = false;
 
+// Se o veículo está sobre o trecho planejado (parada anterior -> esta), usa-o: zero internet
+function plannedLegGuide(targetIdx, gps) {
+    const leg = targetIdx > 0 ? plannedLegGeoms[targetIdx - 1] : null;
+    if (!leg || leg.length < 2) return null;
+    const nr = nearestOnLine(leg, gps.lat, gps.lng);
+    if (nr.distM > NAV_OFFROUTE_METERS) return null;
+    return { type: 'LineString', coordinates: [[gps.lng, gps.lat], ...leg.slice(nr.segIdx + 1)] };
+}
+
 async function computeNavGeometry(targetIdx, force = false) {
     const target = activePoints[targetIdx];
     if (!target) return;
     const gps = lastGpsCoords;
     navGuideIsStraight = false;
 
-    const leg = targetIdx > 0 ? plannedLegGeoms[targetIdx - 1] : null; // trecho planejado: parada anterior -> esta
-
     if (!gps) { // sem GPS: mostra só o trecho planejado (nunca PK2U -> 1ª entrega)
+        const leg = targetIdx > 0 ? plannedLegGeoms[targetIdx - 1] : null;
         fullNavRouteGeometry = (leg && leg.length > 1) ? { type: 'LineString', coordinates: leg } : null;
         return;
     }
 
-    if (leg && leg.length > 1) {
-        const nr = nearestOnLine(leg, gps.lat, gps.lng);
-        if (nr.distM <= NAV_OFFROUTE_METERS) { // está na rota planejada: sem internet
-            fullNavRouteGeometry = { type: 'LineString', coordinates: [[gps.lng, gps.lat], ...leg.slice(nr.segIdx + 1)] };
-            return;
-        }
+    const onPlan = plannedLegGuide(targetIdx, gps);
+    if (onPlan) { // está na rota planejada
+        fullNavRouteGeometry = onPlan;
+        navOffCount = 0;
+        return;
     }
 
     if ((force || Date.now() >= navBlockedUntil) && !_navBusy && navigator.onLine) {
         _navBusy = true;
         let res = null;
+        const heading = (lastGpsSpeed != null && lastGpsSpeed >= 2) ? visualHeading : null; // andando: mantém o sentido
         try {
-            res = await getNavRoute({ lat: gps.lat, lng: gps.lng }, { lat: target.lat, lng: target.lng });
+            res = await getNavRoute({ lat: gps.lat, lng: gps.lng }, { lat: target.lat, lng: target.lng }, heading);
         } catch (e) { res = null; }
         _navBusy = false;
 
@@ -443,13 +463,15 @@ async function computeNavGeometry(targetIdx, force = false) {
         if (res && res.c && res.c.length > 1) {
             fullNavRouteGeometry = { type: 'LineString', coordinates: res.c };
             navFailCount = 0;
-            navBlockedUntil = Date.now() + NAV_MIN_INTERVAL_MS;
+            navOffCount = 0;
+            navBlockedUntil = Date.now() + NAV_REROUTE_MIN_MS;
             return;
         }
         navFailCount++;
-        navBlockedUntil = Date.now() + Math.min(300000, NAV_MIN_INTERVAL_MS * Math.pow(2, navFailCount - 1));
+        navBlockedUntil = Date.now() + Math.min(NAV_REROUTE_MAX_BACKOFF_MS, NAV_REROUTE_MIN_MS * Math.pow(2, navFailCount));
     }
 
+    // Sem rota disponível agora: guia em linha reta TRACEJADA (a rota planejada continua intacta)
     fullNavRouteGeometry = { type: 'LineString', coordinates: [[gps.lng, gps.lat], [target.lng, target.lat]] };
     navGuideIsStraight = true;
 }
@@ -458,7 +480,7 @@ function refreshNavTarget(force) {
     if (isCustomSearchNav) {
         if (searchMarker && (force || Date.now() >= navBlockedUntil)) {
             const ll = searchMarker.getLngLat();
-            navigateToSearchLocation(ll.lat, ll.lng, document.getElementById('nav-next-address').textContent);
+            navigateToSearchLocation(ll.lat, ll.lng, document.getElementById('nav-next-address').textContent, true);
         }
         return;
     }
@@ -466,7 +488,8 @@ function refreshNavTarget(force) {
     computeNavGeometry(idx, force).then(() => { if (currentNavIndex === idx) updateNavLayer(); });
 }
 
-// Chamada a cada posição de GPS (≈1x por segundo) – leve e sem internet na maior parte do tempo
+// Chamada a cada posição de GPS (≈1x por segundo).
+// Na rota: só encurta a linha (sem internet). Saiu da rota: recalcula na hora, a partir de onde você está.
 function onNavGpsUpdate(lat, lng) {
     if (!isNavMode) return;
 
@@ -480,6 +503,7 @@ function onNavGpsUpdate(lat, lng) {
 
     const here = { lat, lng };
     const dTarget = haversine(here, target) * 1000;
+    const straightGuide = () => ({ type: 'LineString', coordinates: [[lng, lat], [target.lng, target.lat]] });
 
     if (isFallbackOrigin) { // navegação começou antes do primeiro sinal de GPS
         isFallbackOrigin = false;
@@ -488,26 +512,50 @@ function onNavGpsUpdate(lat, lng) {
     }
 
     const geom = (fullNavRouteGeometry && !navGuideIsStraight) ? fullNavRouteGeometry.coordinates : null;
+    let offDist = Infinity;
+
     if (geom && geom.length > 1) {
         const nr = nearestOnLine(geom, lat, lng);
-        if (nr.distM <= NAV_OFFROUTE_METERS || dTarget <= NAV_ARRIVED_METERS) {
+        offDist = nr.distM;
+        if (offDist <= NAV_OFFROUTE_METERS || dTarget <= NAV_ARRIVED_METERS) { // na rota
+            navOffCount = 0;
             fullNavRouteGeometry = { type: 'LineString', coordinates: [[lng, lat], ...geom.slice(nr.segIdx + 1)] };
             updateNavLayer();
             return;
         }
     }
 
-    if (dTarget <= NAV_ARRIVED_METERS || navGuideIsStraight) { // guia curto/sem rede acompanha o veículo
-        fullNavRouteGeometry = { type: 'LineString', coordinates: [[lng, lat], [target.lng, target.lat]] };
+    if (dTarget <= NAV_ARRIVED_METERS) { // chegando: guia curto, sem consultar a rede
+        fullNavRouteGeometry = straightGuide();
         navGuideIsStraight = true;
         updateNavLayer();
-        if (dTarget <= NAV_ARRIVED_METERS) return;
+        return;
     }
 
-    const now = Date.now();
-    if (now - lastRecalcTime < 3000) return;
-    lastRecalcTime = now;
-    refreshNavTarget(false);
+    if (!isCustomSearchNav) { // voltou para o trecho planejado? usa ele (sem internet)
+        const onPlan = plannedLegGuide(currentNavIndex, here);
+        if (onPlan) {
+            navOffCount = 0;
+            navGuideIsStraight = false;
+            fullNavRouteGeometry = onPlan;
+            updateNavLayer();
+            return;
+        }
+    }
+
+    // Fora da rota: guia provisório (tracejado) enquanto a nova rota é calculada
+    navOffCount++;
+    fullNavRouteGeometry = straightGuide();
+    navGuideIsStraight = true;
+    updateNavLayer();
+
+    if (navOffCount >= 2 || offDist > NAV_OFFROUTE_FAR_METERS || offDist === Infinity) {
+        const now = Date.now();
+        if (now >= navBlockedUntil && now - lastRecalcTime >= 2000) {
+            lastRecalcTime = now;
+            refreshNavTarget(false);
+        }
+    }
 }
 
 async function updateNavSegmentRoute(forceIdx = null) {
@@ -632,7 +680,6 @@ function toggleNavigationMode(forceIdx = null) {
 
     const btnMap = document.getElementById('btn-gps-nav-mode');
     const navHeader = document.getElementById('nav-header-panel');
-    const distBadge = document.getElementById('dist-badge');
     const topNavBtnText = document.getElementById('nav-mode-top-text');
 
     let validIdx = (activePoints && typeof forceIdx === 'number' && forceIdx >= 0 && forceIdx < activePoints.length) ? forceIdx : null;
@@ -645,7 +692,6 @@ function toggleNavigationMode(forceIdx = null) {
             navHeader.classList.remove('hidden');
         }
         
-        distBadge.classList.add('hidden');
         if (topNavBtnText) topNavBtnText.textContent = "Sair da Navegação";
 
         if (gpsWatchId === null) {
@@ -664,9 +710,6 @@ function toggleNavigationMode(forceIdx = null) {
     } else {
         btnMap.className = "absolute bottom-48 right-3 z-20 w-11 h-11 bg-slate-900/90 hover:bg-slate-800 text-amber-400 backdrop-blur-md rounded-full shadow-2xl border border-slate-700 flex items-center justify-center text-lg active:scale-95 transition";
         navHeader.classList.add('hidden');
-        if (activePoints && activePoints.length > 0) {
-            distBadge.classList.remove('hidden');
-        }
         if (topNavBtnText) topNavBtnText.textContent = "Navegação";
 
         fullNavRouteGeometry = null;
@@ -696,7 +739,6 @@ function handleFile(file) {
     Store.clearPrefix('leg:');
     updateRouteStatusUI();
     updateRouteOnMap();
-    document.getElementById('dist-badge').classList.add('hidden');
     document.getElementById('file-summary-card').classList.add('hidden');
     document.getElementById('btn-qrcode-scan').disabled = true;
 

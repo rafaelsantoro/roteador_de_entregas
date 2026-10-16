@@ -1,12 +1,32 @@
 // Constantes de configuração e APIs
-const CARTO_API_KEY = 'cb1_4b9r_1_b3f372a90351c2d3b18c8639';
-const ORS_API_KEY = 'eyJvcmciOiI1YjNjZTM1OTc4NTExMTAwMDFjZjYyNDgiLCJpZCI6ImIwNzE4MDA5ZDMzMTRhM2RiZjNjY2EyYTQ2ZDFhZWM2IiwiaCI6Im11cm11cjY0In0=';
+
+/* --- CONFIGURAÇÕES LOCAIS (ficam SÓ neste aparelho, nunca no GitHub) ---
+   A chave do OpenRouteService e as coordenadas de "Casa" são digitadas no menu do app
+   (seção "Configurações do aparelho") e guardadas no localStorage do celular. */
+const LOCAL_SETTINGS_KEY = 'delivery_router_local_settings';
+
+function loadLocalSettings() {
+    try { return JSON.parse(localStorage.getItem(LOCAL_SETTINGS_KEY)) || {}; } catch (e) { return {}; }
+}
+
+function saveLocalSettings(patch) {
+    const next = { ...loadLocalSettings(), ...patch };
+    try { localStorage.setItem(LOCAL_SETTINGS_KEY, JSON.stringify(next)); } catch (e) {}
+    return next;
+}
+
+function getOrsKey() {
+    return String(loadLocalSettings().orsKey || '').trim();
+}
+
+// Opcional (mais seguro): endereço de um proxy (ex.: Cloudflare Worker) que guarda a chave no servidor.
+// Se preencher, a chave não precisa existir no aparelho. Veja worker/ors-proxy.js
+const ORS_PROXY_URL = 'https://ree.rafaelsantoro.workers.dev/';
+
 const STORAGE_KEY = 'delivery_router_saved_state';
 
-// URLs de estilos e tiles do CARTO
-//const CARTO_RASTER_URL = `https://basemaps.cartocdn.com/rastertiles/voyager/{z}/{x}/{y}.png?key=${CARTO_API_KEY}`;
-const CARTO_RASTER_URL = `https://tile.openstreetmap.org/{z}/{x}/{y}.png?key=${CARTO_API_KEY}`;
-const LIGHT_THEME_URL = `https://basemaps.cartocdn.com/gl/voyager-gl-style/style.json?key=${CARTO_API_KEY}`;
+// Mapa base (OpenStreetMap). Nenhuma chave é necessária.
+const CARTO_RASTER_URL = 'https://tile.openstreetmap.org/{z}/{x}/{y}.png';
 
 // --- Provedores de rota e limites (pensado para gastar pouca internet) ---
 const ROUTING_PROVIDERS = ['osrm', 'ors'];      // ordem de tentativa: OSRM público primeiro, ORS como reserva
@@ -16,8 +36,12 @@ const OSRM_MAX_COORDS = 100;        // máx. de pontos por pedido de matriz
 const MATRIX_BLOCK = 50;            // tamanho dos blocos quando há mais de 100 pontos
 const ROUTE_CHUNK_WAYPOINTS = 60;   // paradas por pedido de traçado de ruas
 const NET_MIN_GAP_MS = 350;         // intervalo mínimo entre requisições
-const NAV_MIN_INTERVAL_MS = 20000;  // navegação: no máximo 1 consulta nova a cada 20 s
-const NAV_OFFROUTE_METERS = 70;     // só considera "fora da rota" acima disso
+const NAV_REROUTE_MIN_MS = 4000;    // ao sair da rota: recalcula, no máximo 1x a cada 4 s
+const NAV_REROUTE_MAX_BACKOFF_MS = 60000; // se a consulta falhar, espera mais (8 s, 16 s, 32 s, até 60 s)
+const NAV_OFFROUTE_METERS = 50;     // "fora da rota" = mais que isso da linha planejada
+const NAV_OFFROUTE_FAR_METERS = 120;// muito longe da rota: recalcula já no 1º sinal de GPS
+const FOLLOW_PAUSE_MS = 10000;      // câmera para de seguir o GPS por 10 s (busca de endereço / arrastar o mapa)
+const DELIVERY_MIN_PER_PACKAGE = 1; // minutos gastos por pacote (para o tempo estimado do dia)
 const NAV_ARRIVED_METERS = 60;      // perto do destino: nunca recalcula
 const SAME_LOCATION_METERS = 15;    // pacotes a menos disso viram uma única parada
 const SAME_STREET_PENALTY_SEC = 120;// custo (em segundos) de sair de uma rua antes de terminá-la
@@ -25,7 +49,13 @@ const DETOUR_FACTOR = 1.4;          // estimativa sem internet: linha reta x 1,4
 const AVG_SPEED_KMH = 15;           // estimativa sem internet: velocidade média urbana
 
 // Pontos Fixos
-const FIXED_HOME = { lat: -23.086416, lng: -48.918759 };
+// Dica de privacidade: depois de digitar a "Casa" no menu do app, troque estas coordenadas por
+// as da PK2U (ou outro ponto qualquer) para não deixar o endereço da sua casa público no GitHub.
+const DEFAULT_HOME = { lat: -23.086416, lng: -48.918759 };
+const FIXED_HOME = (() => {
+    const h = loadLocalSettings().home;
+    return (h && isFinite(h.lat) && isFinite(h.lng)) ? { lat: Number(h.lat), lng: Number(h.lng) } : DEFAULT_HOME;
+})();
 const FIXED_PK2U = { lat: -23.166412, lng: -48.952036 };
 
 // Estado Global da Aplicação
@@ -60,6 +90,10 @@ let wakeLock = null;
 let navGuideIsStraight = false; // true = linha reta tracejada (sem rota disponível)
 let navFailCount = 0;
 let navBlockedUntil = 0;
+let navOffCount = 0;            // sinais de GPS seguidos fora da rota
+let lastGpsSpeed = null;        // m/s (quando o aparelho informa)
+let followPausedUntil = 0;      // a câmera não segue o GPS antes deste instante
+let suppressFitUntil = 0;       // não reenquadra o mapa nas entregas antes deste instante
 
 // GPS e Pesquisa
 let gpsWatchId = null;

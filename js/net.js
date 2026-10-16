@@ -48,7 +48,8 @@ async function netFetchJson(url, options = {}, timeoutMs = 9000) {
     }
 }
 
-async function netRequest(url, options, timeoutMs, retries = 2) {
+async function netRequest(url, options, timeoutMs, retries = 2, priority = false) {
+    if (priority) return netFetchJson(url, options, timeoutMs); // navegação: fura a fila e não repete
     let lastErr;
     for (let a = 0; a <= retries; a++) {
         try {
@@ -64,8 +65,16 @@ async function netRequest(url, options, timeoutMs, retries = 2) {
     throw lastErr;
 }
 
+// O OpenRouteService só é usado se houver chave neste aparelho (ou um proxy configurado)
+function orsConfigured() { return !!(ORS_PROXY_URL || getOrsKey()); }
+function orsBase() { return ORS_PROXY_URL ? ORS_PROXY_URL.replace(/\/+$/, '') : ORS_BASE; }
 function orsHeaders() {
-    return { 'Authorization': ORS_API_KEY, 'Content-Type': 'application/json' };
+    const h = { 'Content-Type': 'application/json' };
+    if (!ORS_PROXY_URL) h['Authorization'] = getOrsKey();
+    return h;
+}
+function activeProviders() {
+    return ROUTING_PROVIDERS.filter(p => p !== 'ors' || orsConfigured());
 }
 
 /* ---------- Matriz de tempos (para ordenar as paradas) ---------- */
@@ -87,7 +96,7 @@ async function orsTable(coords, sources, destinations) {
     const body = { locations: coords, metrics: ['duration'] };
     if (sources) body.sources = sources;
     if (destinations) body.destinations = destinations;
-    const d = await netRequest(`${ORS_BASE}/v2/matrix/driving-car`,
+    const d = await netRequest(`${orsBase()}/v2/matrix/driving-car`,
         { method: 'POST', headers: orsHeaders(), body: JSON.stringify(body) }, 20000, 1);
     if (!d || !d.durations) throw new Error('ors table');
     return d.durations;
@@ -111,7 +120,7 @@ async function matrixTile(locs, srcIdx, dstIdx) {
     if (!navigator.onLine) return null;
 
     let res = null;
-    for (const prov of ROUTING_PROVIDERS) {
+    for (const prov of activeProviders()) {
         try {
             res = prov === 'osrm'
                 ? await osrmTable(coords, full ? null : sources, full ? null : dests)
@@ -190,9 +199,11 @@ function sliceLeg(coords, a, b) {
     return seg;
 }
 
-async function osrmRouteChunk(wps) {
+async function osrmRouteChunk(wps, opts = {}) {
     const cs = wps.map(p => p.lng.toFixed(6) + ',' + p.lat.toFixed(6)).join(';');
-    const d = await netRequest(`${OSRM_BASE}/route/v1/driving/${cs}?overview=full&geometries=geojson&steps=false`, {}, 25000);
+    let url = `${OSRM_BASE}/route/v1/driving/${cs}?overview=full&geometries=geojson&steps=false`;
+    if (opts.bearing != null && wps.length === 2) url += `&bearings=${Math.round(opts.bearing)},60;`; // sai no sentido em que o veículo anda
+    const d = await netRequest(url, {}, opts.priority ? 8000 : 25000, 2, !!opts.priority);
     if (!d || d.code !== 'Ok' || !d.routes || !d.routes[0]) throw new Error('osrm route');
     const rt = d.routes[0];
     const coords = rt.geometry.coordinates;
@@ -204,15 +215,16 @@ async function osrmRouteChunk(wps) {
     }));
 }
 
-async function orsRouteChunk(wps) {
+async function orsRouteChunk(wps, opts = {}) {
     if (wps.length > 50) { // limite de paradas por pedido no ORS
         const mid = Math.floor(wps.length / 2);
         const a = await orsRouteChunk(wps.slice(0, mid + 1));
         const b = await orsRouteChunk(wps.slice(mid));
         return a.concat(b);
     }
-    const d = await netRequest(`${ORS_BASE}/v2/directions/driving-car/geojson`,
-        { method: 'POST', headers: orsHeaders(), body: JSON.stringify({ coordinates: wps.map(p => [p.lng, p.lat]) }) }, 25000, 1);
+    const d = await netRequest(`${orsBase()}/v2/directions/driving-car/geojson`,
+        { method: 'POST', headers: orsHeaders(), body: JSON.stringify({ coordinates: wps.map(p => [p.lng, p.lat]) }) },
+        opts.priority ? 8000 : 25000, 1, !!opts.priority);
     const f = d && d.features && d.features[0];
     if (!f) throw new Error('ors route');
     const coords = f.geometry.coordinates;
@@ -224,10 +236,10 @@ async function orsRouteChunk(wps) {
     }));
 }
 
-async function fetchRouteLegs(wps) {
-    for (const prov of ROUTING_PROVIDERS) {
+async function fetchRouteLegs(wps, opts = {}) {
+    for (const prov of activeProviders()) {
         try {
-            const legs = prov === 'osrm' ? await osrmRouteChunk(wps) : await orsRouteChunk(wps);
+            const legs = prov === 'osrm' ? await osrmRouteChunk(wps, opts) : await orsRouteChunk(wps, opts);
             if (legs && legs.length === wps.length - 1) return legs;
         } catch (e) {}
     }
@@ -298,12 +310,18 @@ async function ensureLegs(waypoints, onProgress) {
 
 const _navMemo = new Map();
 
-async function getNavRoute(from, to) {
+async function getNavRoute(from, to, heading = null) {
     if (!navigator.onLine) return null;
     const key = `${from.lat.toFixed(4)},${from.lng.toFixed(4)}|${to.lat.toFixed(5)},${to.lng.toFixed(5)}`;
     if (_navMemo.has(key)) return _navMemo.get(key);
-    const legs = await fetchRouteLegs([from, to]);
+
+    let legs = null;
+    if (heading != null && !isNaN(heading)) {
+        legs = await fetchRouteLegs([from, to], { priority: true, bearing: heading }); // tenta seguir no sentido atual
+    }
+    if (!legs) legs = await fetchRouteLegs([from, to], { priority: true });
     if (!legs || !legs[0]) return null;
+
     if (_navMemo.size > 30) _navMemo.delete(_navMemo.keys().next().value);
     _navMemo.set(key, legs[0]);
     return legs[0];

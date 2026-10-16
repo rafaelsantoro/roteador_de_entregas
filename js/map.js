@@ -202,7 +202,7 @@ function startNavAnimationLoop() {
                 }
             }
 
-            if (isNavMode && map) {
+            if (isNavMode && map && Date.now() >= followPausedUntil) {
                 map.jumpTo({
                     center: [lng, lat],
                     bearing: visualHeading,
@@ -256,6 +256,7 @@ function onGpsSuccess(position) {
 
     animStartTime = now;
     lastGpsCoords = { lat, lng };
+    lastGpsSpeed = (position.coords.speed !== null && position.coords.speed !== undefined && !isNaN(position.coords.speed)) ? position.coords.speed : null;
 
     if (!driverMarker) {
         const el = document.createElement('div');
@@ -401,7 +402,14 @@ async function executeAddressSearch() {
             const houseNum = item.address && item.address.house_number ? ` (Nº ${item.address.house_number})` : '';
             const mainTitle = item.display_name.split(',')[0];
 
-            btn.innerHTML = `<i class="fa-solid fa-location-dot text-amber-400 shrink-0"></i><span class="truncate"><strong>${mainTitle}${houseNum}</strong> - ${item.display_name}</span>`;
+            const ic = document.createElement('i');
+            ic.className = 'fa-solid fa-location-dot text-amber-400 shrink-0';
+            const sp = document.createElement('span');
+            sp.className = 'truncate';
+            const st = document.createElement('strong');
+            st.textContent = `${mainTitle}${houseNum}`;
+            sp.append(st, ` - ${item.display_name}`);
+            btn.append(ic, sp);
             btn.onclick = () => selectSearchResult(parseFloat(item.lat), parseFloat(item.lon), item.display_name);
             resultsContainer.appendChild(btn);
         });
@@ -414,39 +422,60 @@ function selectSearchResult(lat, lng, name) {
     toggleSearchBox(false);
     if (searchMarker) searchMarker.remove();
 
+    // Dá ~10 s para escolher (App / Waze / G. Maps) sem a câmera voltar para o GPS
+    followPausedUntil = Date.now() + FOLLOW_PAUSE_MS;
+    suppressFitUntil = Date.now() + FOLLOW_PAUSE_MS;
+
     const el = document.createElement('div');
     el.innerHTML = '<div class="w-8 h-8 rounded-full bg-rose-600 border-2 border-white text-white flex items-center justify-center shadow-lg"><i class="fa-solid fa-flag-checkered text-xs"></i></div>';
 
-    const safeName = name.replace(/'/g, "\\'").replace(/"/g, '&quot;');
+    // Popup montado sem innerHTML: nomes vindos do OpenStreetMap não podem injetar código
+    const makeBtn = (cls, icon, label, handler) => {
+        const b = document.createElement('button');
+        b.className = cls;
+        const i = document.createElement('i');
+        i.className = icon;
+        const sp = document.createElement('span');
+        sp.textContent = label;
+        b.append(i, ' ', sp);
+        b.addEventListener('click', handler);
+        return b;
+    };
+
+    const box = document.createElement('div');
+    box.className = 'p-1 max-w-xs font-sans';
+    const title = document.createElement('h4');
+    title.className = 'font-bold text-slate-900 text-xs truncate';
+    title.textContent = name.length > 45 ? name.substring(0, 45) + '...' : name;
+    const grid = document.createElement('div');
+    grid.className = 'grid grid-cols-3 gap-1 mt-2.5';
+    grid.append(
+        makeBtn('bg-amber-500 hover:bg-amber-600 text-slate-950 text-[10px] font-bold py-1.5 px-1 rounded-lg flex items-center justify-center space-x-1 shadow-sm',
+            'fa-solid fa-compass', 'App', () => { followPausedUntil = 0; suppressFitUntil = 0; navigateToSearchLocation(lat, lng, name); }),
+        makeBtn('bg-cyan-500 hover:bg-cyan-600 text-white text-[10px] font-bold py-1.5 px-1 rounded-lg flex items-center justify-center space-x-1 shadow-sm',
+            'fa-solid fa-location-arrow', 'Waze', () => openWaze(lat, lng)),
+        makeBtn('bg-blue-600 hover:bg-blue-700 text-white text-[10px] font-bold py-1.5 px-1 rounded-lg flex items-center justify-center space-x-1 shadow-sm',
+            'fa-brands fa-google', 'G. Maps', () => openGoogleMaps(lat, lng))
+    );
+    box.append(title, grid);
 
     searchMarker = new maplibregl.Marker({ element: el })
         .setLngLat([lng, lat])
-        .setPopup(new maplibregl.Popup({ closeButton: false, offset: 25 }).setHTML(`
-            <div class="p-1 max-w-xs font-sans">
-                <h4 class="font-bold text-slate-900 text-xs truncate">${name.substring(0, 45)}...</h4>
-                <div class="grid grid-cols-3 gap-1 mt-2.5">
-                    <button onclick="navigateToSearchLocation(${lat}, ${lng}, '${safeName}')" class="bg-amber-500 hover:bg-amber-600 text-slate-950 text-[10px] font-bold py-1.5 px-1 rounded-lg flex items-center justify-center space-x-1 shadow-sm">
-                        <i class="fa-solid fa-compass"></i> <span>App</span>
-                    </button>
-                    <button onclick="openWaze(${lat}, ${lng})" class="bg-cyan-500 hover:bg-cyan-600 text-white text-[10px] font-bold py-1.5 px-1 rounded-lg flex items-center justify-center space-x-1 shadow-sm">
-                        <i class="fa-solid fa-location-arrow"></i> <span>Waze</span>
-                    </button>
-                    <button onclick="openGoogleMaps(${lat}, ${lng})" class="bg-blue-600 hover:bg-blue-700 text-white text-[10px] font-bold py-1.5 px-1 rounded-lg flex items-center justify-center space-x-1 shadow-sm">
-                        <i class="fa-brands fa-google"></i> <span>G. Maps</span>
-                    </button>
-                </div>
-            </div>
-        `))
+        .setPopup(new maplibregl.Popup({ closeButton: false, offset: 25 }).setDOMContent(box))
         .addTo(map);
 
-    if (window.innerWidth < 768) switchMobileTab('map');
+    // Só troca de aba se o mapa ainda não estiver na tela (trocar reenquadrava o mapa nas entregas)
+    const mapPanel = document.getElementById('map-panel');
+    if (window.innerWidth < 768 && mapPanel && mapPanel.classList.contains('hidden')) switchMobileTab('map');
 
     map.flyTo({ center: [lng, lat], zoom: 17 });
     searchMarker.togglePopup();
 }
 
-async function navigateToSearchLocation(lat, lng, name) {
-    if (window.innerWidth < 768) {
+async function navigateToSearchLocation(lat, lng, name, isRecalc = false) {
+    followPausedUntil = 0; // escolheu ir até lá: a câmera volta a seguir o GPS
+    suppressFitUntil = 0;
+    if (!isRecalc && window.innerWidth < 768) {
         switchMobileTab('map');
     }
 
@@ -463,12 +492,10 @@ async function navigateToSearchLocation(lat, lng, name) {
         requestWakeLock();
         const btnMap = document.getElementById('btn-gps-nav-mode');
         const navHeader = document.getElementById('nav-header-panel');
-        const distBadge = document.getElementById('dist-badge');
         const topNavBtnText = document.getElementById('nav-mode-top-text');
 
         btnMap.className = "absolute bottom-48 right-3 z-20 w-11 h-11 bg-amber-400 text-slate-950 backdrop-blur-md rounded-full shadow-2xl border-2 border-white flex items-center justify-center text-lg active:scale-95 transition ring-4 ring-amber-400/30";
         navHeader.classList.remove('hidden');
-        distBadge.classList.add('hidden');
         if (topNavBtnText) topNavBtnText.textContent = "Sair da Navegação";
 
         if (gpsWatchId === null) {
@@ -498,24 +525,26 @@ async function navigateToSearchLocation(lat, lng, name) {
     let res = null;
     if (navigator.onLine) {
         try {
-            res = await getNavRoute({ lat: startCoord[1], lng: startCoord[0] }, { lat, lng });
+            const heading = (lastGpsSpeed != null && lastGpsSpeed >= 2) ? visualHeading : null;
+            res = await getNavRoute({ lat: startCoord[1], lng: startCoord[0] }, { lat, lng }, heading);
         } catch (err) { res = null; }
     }
 
     if (res && res.c && res.c.length > 1) {
         fullNavRouteGeometry = { type: 'LineString', coordinates: res.c };
         navFailCount = 0;
-        navBlockedUntil = Date.now() + NAV_MIN_INTERVAL_MS;
+        navOffCount = 0;
+        navBlockedUntil = Date.now() + NAV_REROUTE_MIN_MS;
     } else {
         fullNavRouteGeometry = { type: 'LineString', coordinates: [startCoord, endCoord] };
         navGuideIsStraight = true;
         navFailCount++;
-        navBlockedUntil = Date.now() + Math.min(300000, NAV_MIN_INTERVAL_MS * Math.pow(2, navFailCount - 1));
+        navBlockedUntil = Date.now() + Math.min(NAV_REROUTE_MAX_BACKOFF_MS, NAV_REROUTE_MIN_MS * Math.pow(2, navFailCount));
     }
 
     updateRouteOnMap();
 
-    if (map) {
+    if (map && !isRecalc) {
         map.flyTo({
             center: startCoord,
             pitch: is3DMode ? 60 : 0,
@@ -742,18 +771,18 @@ function createPopupHtml(idx, p) {
     return `
         <div class="p-1 max-w-xs font-sans">
             <span class="text-xs uppercase font-bold bg-indigo-100 text-indigo-700 px-2 py-0.5 rounded">Parada #${idx + 1}</span>
-            <h4 class="font-bold text-slate-900 text-base mt-1.5 leading-snug">${p.spx}</h4>
-            <p class="text-sm text-slate-700 font-medium mt-1"><i class="fa-solid fa-location-dot text-indigo-500 mr-1"></i>${p.address}</p>
-            <p class="text-xs text-slate-500 mt-1"><strong>Bairro:</strong> ${p.bairro}</p>
+            <h4 class="font-bold text-slate-900 text-base mt-1.5 leading-snug">${escapeHtml(p.spx)}</h4>
+            <p class="text-sm text-slate-700 font-medium mt-1"><i class="fa-solid fa-location-dot text-indigo-500 mr-1"></i>${escapeHtml(p.address)}</p>
+            <p class="text-xs text-slate-500 mt-1"><strong>Bairro:</strong> ${escapeHtml(p.bairro)}</p>
             
             <div class="grid grid-cols-3 gap-1 mt-2.5 pt-2 border-t border-slate-100">
                 <button onclick="navigateToPoint(${idx})" class="bg-amber-500 hover:bg-amber-600 text-slate-950 text-[11px] font-bold py-1.5 px-1 rounded-lg flex items-center justify-center space-x-1 shadow-sm">
                     <i class="fa-solid fa-compass"></i> <span>App</span>
                 </button>
-                <button onclick="openWaze(${p.lat}, ${p.lng})" class="bg-cyan-500 hover:bg-cyan-600 text-white text-[11px] font-bold py-1.5 px-1 rounded-lg flex items-center justify-center space-x-1 shadow-sm">
+                <button onclick="openWaze(${Number(p.lat)}, ${Number(p.lng)})" class="bg-cyan-500 hover:bg-cyan-600 text-white text-[11px] font-bold py-1.5 px-1 rounded-lg flex items-center justify-center space-x-1 shadow-sm">
                     <i class="fa-solid fa-location-arrow"></i> <span>Waze</span>
                 </button>
-                <button onclick="openGoogleMaps(${p.lat}, ${p.lng})" class="bg-blue-600 hover:bg-blue-700 text-white text-[11px] font-bold py-1.5 px-1 rounded-lg flex items-center justify-center space-x-1 shadow-sm">
+                <button onclick="openGoogleMaps(${Number(p.lat)}, ${Number(p.lng)})" class="bg-blue-600 hover:bg-blue-700 text-white text-[11px] font-bold py-1.5 px-1 rounded-lg flex items-center justify-center space-x-1 shadow-sm">
                     <i class="fa-brands fa-google"></i> <span>G. Maps</span>
                 </button>
             </div>
@@ -803,8 +832,7 @@ async function renderMapAndUI(points, fetchRoads = true) {
         await buildPlannedRoute(points, true);   // baixa cada trecho uma vez e guarda no aparelho
         updateRouteOnMap();
 
-        document.getElementById('dist-badge').classList.remove('hidden');
-        document.getElementById('dist-text').textContent = `${routeLegsStatus.ready < routeLegsStatus.total ? '≈ ' : ''}${currentRouteDistanceKm} km`;
+        updateRouteSummaryUI(); // km e tempo ficam fixos na barra superior
     } else {
         updateRouteOnMap();
     }
@@ -880,7 +908,7 @@ async function downloadAvareUrbanMap(minZoom = 14, maxZoom = 17) {
         for (let i = 0; i < urlArray.length; i += 10) {
             const batch = urlArray.slice(i, i + 10);
             await Promise.all(batch.map(async (url) => {
-                const match = await cache.match(url);
+                const match = await cache.match(url, { ignoreSearch: true });
                 if (!match) {
                     try {
                         const res = await fetch(url);
@@ -927,7 +955,7 @@ async function runDemoNavigation() {
         const response = await fetch('https://api.openrouteservice.org/v2/directions/driving-car/geojson', {
             method: 'POST',
             headers: {
-                'Authorization': ORS_API_KEY,
+                'Authorization': getOrsKey(),
                 'Content-Type': 'application/json'
             },
             body: JSON.stringify({
