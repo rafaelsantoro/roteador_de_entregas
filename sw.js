@@ -1,5 +1,5 @@
 // Para publicar uma nova versão do app: aumente este número (v3, v4...)
-const CACHE_NAME = 'roteador-entregas-v3';
+const CACHE_NAME = 'roteador-entregas-v2';
 const TILE_CACHE_NAME = 'map-tiles-cache';
 
 // Todos os arquivos do app: depois da 1ª abertura com internet, ele abre 100% offline
