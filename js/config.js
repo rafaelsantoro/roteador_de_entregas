@@ -26,7 +26,10 @@ const ORS_PROXY_URL = 'https://ree.rafaelsantoro.workers.dev/';
 const STORAGE_KEY = 'delivery_router_saved_state';
 
 // Mapa base (OpenStreetMap). Nenhuma chave é necessária.
-const CARTO_RASTER_URL = 'https://tile.openstreetmap.org/{z}/{x}/{y}.png';
+// const CARTO_RASTER_URL = 'https://tile.openstreetmap.org/{z}/{x}/{y}.png';
+
+// Servidor CDN da CARTO Voyager - Rápido, estável e sem bloqueios de DNS
+const CARTO_RASTER_URL = 'https://basemaps.cartocdn.com/rastertiles/voyager/{z}/{x}/{y}.png';
 
 // --- Provedores de rota e limites (pensado para gastar pouca internet) ---
 const ROUTING_PROVIDERS = ['osrm', 'ors'];      // ordem de tentativa: OSRM público primeiro, ORS como reserva
