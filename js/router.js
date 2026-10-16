@@ -766,6 +766,7 @@ function parseAndValidateData(json) {
                 lat: lat,
                 lng: lng,
                 status: 'pending'
+				scanned: false // Indica se o pacote foi conferido via QR Code
             });
         } else {
             skippedCount++;
