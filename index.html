@@ -47,7 +47,7 @@
         </div>
 
         <!-- Dynamic Counters & Fullscreen Button -->
-        <div id="status-counters" class="flex items-center space-x-1.5 text-xs mt-1 sm:mt-0">
+        <div id="status-counters" class="flex flex-wrap items-center gap-1.5 text-xs mt-1 sm:mt-0">
             <span class="bg-slate-800 text-slate-300 px-2.5 py-1 rounded-md border border-slate-700 font-semibold text-xs" title="Total">
                 <i class="fa-solid fa-boxes-packing text-indigo-400 mr-1"></i><span id="cnt-total">0</span>
             </span>
@@ -60,6 +60,10 @@
             <button onclick="toggleFullscreen()" title="Alternar Tela Cheia" class="bg-slate-800 hover:bg-slate-700 text-slate-300 px-2 py-1 rounded-md border border-slate-700 font-semibold text-xs transition flex items-center justify-center">
                 <i class="fa-solid fa-expand" id="fullscreen-icon"></i>
             </button>
+            <!-- Quilometragem e tempo estimado do dia (fixo, em qualquer tela) -->
+            <span id="route-summary" class="hidden bg-slate-800 text-amber-300 px-2.5 py-1 rounded-md border border-slate-700 font-bold text-xs flex items-center whitespace-nowrap" title="Distância total (Casa ➔ PK2U ➔ Entregas ➔ Casa) e tempo estimado">
+                <i class="fa-solid fa-road text-amber-400 mr-1.5"></i><span id="route-summary-text">0 km</span>
+            </span>
         </div>
     </header>
 
@@ -203,6 +207,17 @@
 					        <span>Baixar trechos pendentes</span>
 					    </button>
 					</div>
+					<!-- Configurações que ficam SÓ neste aparelho (fora do GitHub) -->
+					<div class="pt-2 border-t border-slate-800 mt-3">
+					    <label class="text-[10px] uppercase font-bold text-slate-400 block mb-1.5">Configurações do aparelho</label>
+					    <input id="setting-ors-key" type="password" autocomplete="off" spellcheck="false" placeholder="Chave OpenRouteService (opcional)" class="w-full text-[11px] border border-slate-300 rounded-lg px-2 py-1.5 mb-1.5 bg-white text-slate-800">
+					    <input id="setting-home" type="text" autocomplete="off" spellcheck="false" placeholder="Casa: latitude, longitude" class="w-full text-[11px] border border-slate-300 rounded-lg px-2 py-1.5 mb-1.5 bg-white text-slate-800">
+					    <div id="setting-status" class="text-[10px] text-slate-500 leading-snug mb-1.5"></div>
+					    <div class="grid grid-cols-2 gap-1.5">
+					        <button onclick="saveLocalSettingsFromUI()" class="bg-slate-800 hover:bg-slate-700 active:scale-95 text-white font-bold text-[11px] py-2 px-2 rounded-xl transition shadow-sm">Salvar</button>
+					        <button onclick="clearLocalData()" class="bg-rose-600 hover:bg-rose-700 active:scale-95 text-white font-bold text-[11px] py-2 px-2 rounded-xl transition shadow-sm">Apagar dados do dia</button>
+					    </div>
+					</div>
                 </div>
             </div>
 
@@ -301,20 +316,6 @@
             <button id="btn-gps-toggle" onclick="toggleGPS()" title="Ativar GPS em Tempo Real" class="absolute bottom-36 right-3 z-20 w-11 h-11 bg-slate-900/90 hover:bg-slate-800 text-slate-300 backdrop-blur-md rounded-full shadow-2xl border border-slate-700 flex items-center justify-center text-lg active:scale-95 transition">
                 <i class="fa-solid fa-location-crosshairs" id="gps-icon"></i>
             </button>
-
-            <!-- Mobile Quick Toggle Back to List -->
-            <button onclick="switchMobileTab('list')" class="md:hidden absolute bottom-5 left-1/2 -translate-x-1/2 z-20 bg-slate-900/95 text-white px-4 py-2.5 rounded-full shadow-2xl border border-slate-700 text-xs font-bold flex items-center space-x-2 active:scale-95 transition">
-                <i class="fa-solid fa-list-check text-indigo-400"></i>
-                <span>Ver Lista de Entregas</span>
-            </button>
-
-            <!-- Distance Floating Badge -->
-            <div id="dist-badge" class="hidden absolute top-3 left-3 z-10 bg-slate-900/90 backdrop-blur-md text-white px-3 py-1.5 rounded-full shadow-lg border border-slate-700 text-xs font-bold flex items-center space-x-2">
-                <i class="fa-solid fa-road text-amber-400"></i>
-                <div>
-                    <span id="dist-text" class="text-sm text-amber-300">0 km</span>
-                </div>
-            </div>
 
             <!-- Loading Overlay -->
             <div id="loading-overlay" class="hidden absolute inset-0 bg-slate-900/60 backdrop-blur-sm z-[1000] flex items-center justify-center">

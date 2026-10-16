@@ -1,5 +1,5 @@
 // Para publicar uma nova versão do app: aumente este número (v3, v4...)
-const CACHE_NAME = 'roteador-entregas-v2';
+const CACHE_NAME = 'roteador-entregas-v3';
 const TILE_CACHE_NAME = 'map-tiles-cache';
 
 // Todos os arquivos do app: depois da 1ª abertura com internet, ele abre 100% offline
@@ -8,6 +8,9 @@ const ASSETS_TO_CACHE = [
   './index.html',
   './manifest.json',
   './icon.jpg',
+  './icon-192.png',
+  './icon-512.jpg',
+  './favicon.ico',
   './css/styles.css',
   './js/config.js',
   './js/store.js',
@@ -64,7 +67,7 @@ self.addEventListener('fetch', (event) => {
   if (url.hostname.includes('cartocdn.com') || url.hostname.includes('tile.openstreetmap.org')) {
     event.respondWith(
       caches.open(TILE_CACHE_NAME).then(async (cache) => {
-        const cached = await cache.match(req);
+        const cached = await cache.match(req, { ignoreSearch: true }); // aceita tiles guardados antes (com ?key=)
         if (cached) return cached;
         try {
           const net = await fetch(req);
