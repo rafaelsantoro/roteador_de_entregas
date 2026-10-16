@@ -323,16 +323,27 @@
         </main>
     </div>
 
-    <!-- Modal do Leitor de QR Code -->
+	<!-- Modal do Leitor de QR Code -->
     <div id="qr-modal" class="hidden fixed inset-0 bg-slate-950/85 backdrop-blur-md z-[2000] flex flex-col items-center justify-center p-4">
         <div class="bg-slate-900 border border-slate-700 rounded-2xl w-full max-w-md overflow-hidden shadow-2xl flex flex-col relative">
-            <!-- Header do Modal -->
+            <!-- Header do Modal com Contador de Conferência -->
             <div class="bg-slate-800 px-4 py-3 border-b border-slate-700 flex items-center justify-between">
                 <div class="flex items-center space-x-2 text-purple-400 font-bold text-sm">
                     <i class="fa-solid fa-qrcode text-base"></i>
-                    <span>Escanear QR Code do Pacote</span>
+                    <span>Conferência de Pacotes</span>
                 </div>
-                <button onclick="closeQrScannerModal()" class="text-slate-400 hover:text-white font-bold text-lg px-2 active:scale-95 transition">✕</button>
+                
+                <div class="flex items-center space-x-2">
+                    <!-- Contador de Pacotes Escaneados -->
+                    <span id="qr-scan-counter" class="text-xs bg-purple-950 text-purple-200 px-2.5 py-0.5 rounded-full font-bold border border-purple-700/50">0 / 0</span>
+                    <button onclick="closeQrScannerModal()" class="text-slate-400 hover:text-white font-bold text-lg px-2 active:scale-95 transition" title="Fechar leitor">✕</button>
+                </div>
+            </div>
+
+            <!-- Banner Verde quando 100% dos Pacotes forem Escaneados -->
+            <div id="qr-complete-banner" class="hidden bg-emerald-600 text-white text-xs font-black px-4 py-2 flex items-center justify-center space-x-2 shadow-md">
+                <i class="fa-solid fa-circle-check text-base"></i>
+                <span>TODOS OS PACOTES FORAM CONFERIDOS!</span>
             </div>
 
             <!-- Área de Vídeo / Leitor HTML5 -->
@@ -340,7 +351,7 @@
                 <div id="qr-reader" class="w-full rounded-xl overflow-hidden border border-slate-800"></div>
                 <p class="text-slate-400 text-xs mt-3 text-center">Aproxime a câmera da etiqueta com QR Code do pacote</p>
 
-                <!-- Overlay de Resultado Grande (Mostrado por 4.5 segundos após leitura com Fonte de Endereço Maior) -->
+                <!-- Overlay de Resultado Grande -->
                 <div id="qr-result-overlay" class="hidden absolute inset-0 bg-amber-400 text-slate-950 flex flex-col items-center justify-center p-4 z-10 text-center transition-all duration-300">
                     <span class="text-xs font-black uppercase tracking-widest bg-slate-950 text-amber-400 px-3.5 py-1 rounded-full mb-2">Número na Rota</span>
                     <h2 id="qr-result-number" class="text-8xl sm:text-9xl font-black leading-none drop-shadow-md">#--</h2>
@@ -348,7 +359,7 @@
                     <p id="qr-result-address" class="text-sm sm:text-base font-extrabold text-slate-950 break-words max-w-full mt-2 leading-snug px-2"></p>
                 </div>
 
-                <!-- Overlay de Erro (Não encontrado) -->
+                <!-- Overlay de Erro -->
                 <div id="qr-error-overlay" class="hidden absolute inset-0 bg-rose-600 text-white flex flex-col items-center justify-center p-4 z-10 text-center transition-all duration-300">
                     <i class="fa-solid fa-triangle-exclamation text-5xl mb-2"></i>
                     <h3 class="text-xl font-bold">Pacote Não Encontrado</h3>
