@@ -155,7 +155,6 @@ function isSimilarStreet(a, b) {
     return false;
 }
 
-// Mesma rua em bairros diferentes NÃO é a mesma rua. Pequenos erros de digitação são unificados.
 function assignStreetKeys(items) {
     const groups = [];
     items.forEach(it => {
@@ -171,8 +170,6 @@ function assignStreetKeys(items) {
     });
 }
 
-/* --- PARADAS: pacotes no mesmo ponto viram uma única parada (matriz menor = menos internet) --- */
-
 function groupStops(points) {
     const stops = [];
     points.forEach(p => {
@@ -183,14 +180,18 @@ function groupStops(points) {
     return stops;
 }
 
-/* --- ORDENAÇÃO DA ROTA ---
-   Casa e PK2U só entram no cálculo (distância do dia); não são desenhadas.
-   Início fixo na PK2U e fim fixo em Casa. */
+/* --- ORDENAÇÃO DA ROTA (SUPORTA ÂNCORAS OU MÉTODO CONVENCIONAL PADRÃO) --- */
 
 async function solveDeliveriesTSP(deliveries, manualFirstIdx, prioritizeSameStreet, onStatus) {
     lastSolveInfo = null;
     if (!deliveries || deliveries.length === 0) return [];
 
+    // Se houver âncoras personalizadas marcadas no mapa, executa a otimização por âncoras encadeadas
+    if (typeof customWaypoints !== 'undefined' && customWaypoints && customWaypoints.length > 0) {
+        return await solveSegmentedTSP(deliveries, manualFirstIdx, prioritizeSameStreet, onStatus);
+    }
+
+    // Caso contrário, usa o método padrão convencional de sempre
     const say = (t) => { if (onStatus) onStatus(t); };
     const stops = groupStops(deliveries);
     const locs = [FIXED_PK2U, ...stops, FIXED_HOME];
@@ -218,7 +219,7 @@ async function solveDeliveriesTSP(deliveries, manualFirstIdx, prioritizeSameStre
     order.forEach(stopIdx => {
         const stop = stops[stopIdx - 1];
         const pts = stop.pts.slice();
-        if (manualPoint && pts.includes(manualPoint)) { // o pacote escolhido como 1ª entrega vai primeiro
+        if (manualPoint && pts.includes(manualPoint)) {
             pts.splice(pts.indexOf(manualPoint), 1);
             pts.unshift(manualPoint);
         }
@@ -227,6 +228,79 @@ async function solveDeliveriesTSP(deliveries, manualFirstIdx, prioritizeSameStre
 
     lastSolveInfo = { stops: stops.length, packages: deliveries.length, totalTiles, estimatedTiles };
     return result;
+}
+
+// Otimização Encadeada por Âncoras
+async function solveSegmentedTSP(deliveries, manualFirstIdx, prioritizeSameStreet, onStatus) {
+    const say = (t) => { if (onStatus) onStatus(t); };
+    say('Agrupando entregas pelas âncoras indicadas...');
+
+    const groups = customWaypoints.map(() => []);
+    
+    deliveries.forEach(pkg => {
+        let bestWpIdx = 0;
+        let minDist = Infinity;
+        
+        customWaypoints.forEach((wp, wIdx) => {
+            const d = haversine(pkg, wp);
+            if (d < minDist) {
+                minDist = d;
+                bestWpIdx = wIdx;
+            }
+        });
+        
+        groups[bestWpIdx].push(pkg);
+    });
+
+    const finalOrderedPackages = [];
+    let totalStopsCount = 0;
+    let totalTilesCount = 0;
+    let totalEstimatedTilesCount = 0;
+
+    for (let i = 0; i < groups.length; i++) {
+        const groupPkgs = groups[i];
+        if (groupPkgs.length === 0) continue;
+
+        say(`Otimizando setor da Âncora ${i + 1} (${i + 1}/${groups.length})...`);
+        
+        const firstIdx = (i === 0) ? manualFirstIdx : -1;
+        const stops = groupStops(groupPkgs);
+        const locs = [FIXED_PK2U, ...stops, FIXED_HOME];
+        
+        const { dur, totalTiles, estimatedTiles } = await buildDurationMatrix(locs, (d, t) => {
+            say(`Otimizando Âncora ${i + 1} (${d}/${t})...`);
+        });
+
+        totalStopsCount += stops.length;
+        totalTilesCount += totalTiles || 0;
+        totalEstimatedTilesCount += estimatedTiles || 0;
+
+        const streetKeys = ['__inicio', ...stops.map((s, k) => s.streetKey || ('__avulsa' + k)), '__fim'];
+        
+        let firstFixed = 0;
+        const manualPoint = (firstIdx >= 0 && firstIdx < groupPkgs.length) ? groupPkgs[firstIdx] : null;
+        if (manualPoint) firstFixed = stops.findIndex(s => s.pts.includes(manualPoint)) + 1;
+
+        const order = await solveRoute({
+            dur,
+            streetKeys,
+            penalty: prioritizeSameStreet ? SAME_STREET_PENALTY_SEC : 0,
+            firstFixed
+        });
+
+        order.forEach(stopIdx => {
+            const stop = stops[stopIdx - 1];
+            const pts = stop.pts.slice();
+            if (manualPoint && pts.includes(manualPoint)) {
+                pts.splice(pts.indexOf(manualPoint), 1);
+                pts.unshift(manualPoint);
+            }
+            finalOrderedPackages.push(...pts);
+        });
+    }
+
+    lastSolveInfo = { stops: totalStopsCount, packages: deliveries.length, totalTiles: totalTilesCount, estimatedTiles: totalEstimatedTilesCount };
+    return finalOrderedPackages;
 }
 
 function applyMarkerJitter(points) {
@@ -266,10 +340,6 @@ function applyMarkerJitter(points) {
     });
 }
 
-/* --- ROTA PLANEJADA: trechos de rua entre as entregas, salvos no aparelho ---
-   Casa -> PK2U -> 1ª entrega e última entrega -> Casa entram só na distância total.
-   Só os trechos entre entregas são desenhados no mapa. */
-
 let _legsBusy = false;
 
 function getPlanWaypoints(points) {
@@ -305,7 +375,6 @@ function updateRouteStatusUI() {
     updateRouteSummaryUI();
 }
 
-// Quilometragem e tempo estimado do dia: ficam FIXOS na barra superior, em qualquer tela
 function getRouteTimeMinutes() {
     const km = parseFloat(currentRouteDistanceKm) || 0;
     const driveMin = Math.round((km / AVG_SPEED_KMH) * 60);
@@ -332,7 +401,6 @@ function updateRouteSummaryUI() {
     txt.textContent = `${approx ? '≈ ' : ''}${currentRouteDistanceKm} km · ${timeFormatted}`;
 }
 
-// Monta tudo a partir do que está guardado no aparelho (sem internet)
 function refreshPlannedFromCache(points) {
     const wps = getPlanWaypoints(points);
     const n = points.length;
@@ -347,7 +415,7 @@ function refreshPlannedFromCache(points) {
         if (leg) { ready++; sumM += leg.d; }
         else estM += haversine(wps[i], wps[i + 1]) * 1000 * DETOUR_FACTOR;
 
-        if (i >= 2 && i <= n) { // pares entre entregas (os 3 trechos extras só contam distância)
+        if (i >= 2 && i <= n) {
             const k = i - 2;
             if (leg) plannedLegGeoms[k] = leg.c;
             else plannedGapSegments.push([[wps[i].lng, wps[i].lat], [wps[i + 1].lng, wps[i + 1].lat]]);
@@ -369,7 +437,6 @@ async function buildPlannedRoute(points, showProgress = false) {
     refreshPlannedFromCache(points);
 }
 
-// Ao abrir o app: usa o que está salvo e só completa o que faltar se houver internet
 async function restorePlannedRoute() {
     if (!activePoints || activePoints.length === 0) return;
     await loadLegsFromStore(getPlanWaypoints(activePoints));
@@ -395,12 +462,6 @@ async function retryMissingLegs(manual = false) {
     }
 }
 
-/* --- GUIA DE NAVEGAÇÃO (veículo -> próxima entrega) ---
-   1º usa o trecho planejado que já está no aparelho (zero internet).
-   2º só consulta a rede se o veículo realmente saiu da rota, no máximo 1x a cada 20 s,
-      com espera maior depois de falhas.
-   3º sem rede: linha reta TRACEJADA como guia. A rota planejada nunca é alterada. */
-
 function nearestOnLine(coords, lat, lng) {
     const kLng = Math.cos(lat * Math.PI / 180);
     const M = 111320;
@@ -421,7 +482,6 @@ function nearestOnLine(coords, lat, lng) {
 
 let _navBusy = false;
 
-// Se o veículo está sobre o trecho planejado (parada anterior -> esta), usa-o: zero internet
 function plannedLegGuide(targetIdx, gps) {
     const leg = targetIdx > 0 ? plannedLegGeoms[targetIdx - 1] : null;
     if (!leg || leg.length < 2) return null;
@@ -436,14 +496,14 @@ async function computeNavGeometry(targetIdx, force = false) {
     const gps = lastGpsCoords;
     navGuideIsStraight = false;
 
-    if (!gps) { // sem GPS: mostra só o trecho planejado (nunca PK2U -> 1ª entrega)
+    if (!gps) {
         const leg = targetIdx > 0 ? plannedLegGeoms[targetIdx - 1] : null;
         fullNavRouteGeometry = (leg && leg.length > 1) ? { type: 'LineString', coordinates: leg } : null;
         return;
     }
 
     const onPlan = plannedLegGuide(targetIdx, gps);
-    if (onPlan) { // está na rota planejada
+    if (onPlan) {
         fullNavRouteGeometry = onPlan;
         navOffCount = 0;
         return;
@@ -452,13 +512,13 @@ async function computeNavGeometry(targetIdx, force = false) {
     if ((force || Date.now() >= navBlockedUntil) && !_navBusy && navigator.onLine) {
         _navBusy = true;
         let res = null;
-        const heading = (lastGpsSpeed != null && lastGpsSpeed >= 2) ? visualHeading : null; // andando: mantém o sentido
+        const heading = (lastGpsSpeed != null && lastGpsSpeed >= 2) ? visualHeading : null;
         try {
             res = await getNavRoute({ lat: gps.lat, lng: gps.lng }, { lat: target.lat, lng: target.lng }, heading);
         } catch (e) { res = null; }
         _navBusy = false;
 
-        if (currentNavIndex !== targetIdx) return; // o destino mudou enquanto consultava
+        if (currentNavIndex !== targetIdx) return;
 
         if (res && res.c && res.c.length > 1) {
             fullNavRouteGeometry = { type: 'LineString', coordinates: res.c };
@@ -471,7 +531,6 @@ async function computeNavGeometry(targetIdx, force = false) {
         navBlockedUntil = Date.now() + Math.min(NAV_REROUTE_MAX_BACKOFF_MS, NAV_REROUTE_MIN_MS * Math.pow(2, navFailCount));
     }
 
-    // Sem rota disponível agora: guia em linha reta TRACEJADA (a rota planejada continua intacta)
     fullNavRouteGeometry = { type: 'LineString', coordinates: [[gps.lng, gps.lat], [target.lng, target.lat]] };
     navGuideIsStraight = true;
 }
@@ -488,8 +547,6 @@ function refreshNavTarget(force) {
     computeNavGeometry(idx, force).then(() => { if (currentNavIndex === idx) updateNavLayer(); });
 }
 
-// Chamada a cada posição de GPS (≈1x por segundo).
-// Na rota: só encurta a linha (sem internet). Saiu da rota: recalcula na hora, a partir de onde você está.
 function onNavGpsUpdate(lat, lng) {
     if (!isNavMode) return;
 
@@ -505,7 +562,7 @@ function onNavGpsUpdate(lat, lng) {
     const dTarget = haversine(here, target) * 1000;
     const straightGuide = () => ({ type: 'LineString', coordinates: [[lng, lat], [target.lng, target.lat]] });
 
-    if (isFallbackOrigin) { // navegação começou antes do primeiro sinal de GPS
+    if (isFallbackOrigin) {
         isFallbackOrigin = false;
         refreshNavTarget(true);
         return;
@@ -517,7 +574,7 @@ function onNavGpsUpdate(lat, lng) {
     if (geom && geom.length > 1) {
         const nr = nearestOnLine(geom, lat, lng);
         offDist = nr.distM;
-        if (offDist <= NAV_OFFROUTE_METERS || dTarget <= NAV_ARRIVED_METERS) { // na rota
+        if (offDist <= NAV_OFFROUTE_METERS || dTarget <= NAV_ARRIVED_METERS) {
             navOffCount = 0;
             fullNavRouteGeometry = { type: 'LineString', coordinates: [[lng, lat], ...geom.slice(nr.segIdx + 1)] };
             updateNavLayer();
@@ -525,14 +582,14 @@ function onNavGpsUpdate(lat, lng) {
         }
     }
 
-    if (dTarget <= NAV_ARRIVED_METERS) { // chegando: guia curto, sem consultar a rede
+    if (dTarget <= NAV_ARRIVED_METERS) {
         fullNavRouteGeometry = straightGuide();
         navGuideIsStraight = true;
         updateNavLayer();
         return;
     }
 
-    if (!isCustomSearchNav) { // voltou para o trecho planejado? usa ele (sem internet)
+    if (!isCustomSearchNav) {
         const onPlan = plannedLegGuide(currentNavIndex, here);
         if (onPlan) {
             navOffCount = 0;
@@ -543,7 +600,6 @@ function onNavGpsUpdate(lat, lng) {
         }
     }
 
-    // Fora da rota: guia provisório (tracejado) enquanto a nova rota é calculada
     navOffCount++;
     fullNavRouteGeometry = straightGuide();
     navGuideIsStraight = true;
@@ -808,7 +864,7 @@ async function parseAndValidateData(json) {
                 lat: lat,
                 lng: lng,
                 status: 'pending',
-                scanned: false // Indica se o pacote foi conferido via QR Code
+                scanned: false
             });
         } else {
             skippedCount++;
@@ -850,7 +906,6 @@ async function optimizeAndDrawRoute() {
         return;
     }
 
-    // Proteção da numeração: os pacotes já estão etiquetados/separados pela ordem atual
     if (routeIsOptimized) {
         const hasProgress = activePoints.some(p => p.status !== 'pending');
         const msg = hasProgress
@@ -873,6 +928,12 @@ async function optimizeAndDrawRoute() {
 
         activePoints = await solveDeliveriesTSP(rawData, firstIdx, prioritizeSameStreet, showLoading);
         routeIsOptimized = true;
+
+        // Limpa as âncoras e reseta o modo âncora após calcular
+        if (typeof clearCustomWaypoints === 'function') {
+            clearCustomWaypoints();
+        }
+
         await renderMapAndUI(activePoints, true);
 
         document.getElementById('btn-qrcode-scan').disabled = false;

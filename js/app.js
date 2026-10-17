@@ -156,7 +156,6 @@ function loadStateFromLocalStorage() {
     }
 }
 
-// Event Listeners Globais de Inicialização (Sem 'once: true' para reativar tela cheia a cada toque se o usuário desejar)
 document.addEventListener('click', enableAutoFullscreen);
 document.addEventListener('touchstart', enableAutoFullscreen);
 
@@ -192,40 +191,40 @@ document.addEventListener('DOMContentLoaded', () => {
         if (warnBox) warnBox.classList.remove('hidden');
     }
 
-	map = new maplibregl.Map({
-		container: 'map',
-		fadeDuration: 0, // Desativa o tempo global de transição da renderização
-		maxZoom: 20,
-		style: {
-			version: 8,
-			sources: {
-				'carto-tiles': {
-					type: 'raster',
-					tiles: [
-						CARTO_RASTER_URL
-					],
-					tileSize: 256,
-					maxzoom: 19,
-					attribution: '&copy; <a href="https://carto.com/">CARTO</a> &copy; <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a>'
-				}
-			},
-			layers: [
-				{
-					id: 'carto-tiles-layer',
-					type: 'raster',
-					source: 'carto-tiles',
-					minzoom: 0,
-					maxzoom: 22,
-					paint: {
-						'raster-fade-duration': 0 // Elimina a transição gradual de 300ms nos tiles
-					}
-				}
-			]
-		},
-		pixelRatio: window.devicePixelRatio || 2,
-		center: [-48.91, -23.10],
-		zoom: 16
-	});
+    map = new maplibregl.Map({
+        container: 'map',
+        fadeDuration: 0,
+        maxZoom: 20,
+        style: {
+            version: 8,
+            sources: {
+                'carto-tiles': {
+                    type: 'raster',
+                    tiles: [
+                        CARTO_RASTER_URL
+                    ],
+                    tileSize: 256,
+                    maxzoom: 19,
+                    attribution: '&copy; <a href="https://carto.com/">CARTO</a> &copy; <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a>'
+                }
+            },
+            layers: [
+                {
+                    id: 'carto-tiles-layer',
+                    type: 'raster',
+                    source: 'carto-tiles',
+                    minzoom: 0,
+                    maxzoom: 22,
+                    paint: {
+                        'raster-fade-duration': 0
+                    }
+                }
+            ]
+        },
+        pixelRatio: window.devicePixelRatio || 2,
+        center: [-48.91, -23.10],
+        zoom: 16
+    });
 
     map.addControl(new maplibregl.NavigationControl({ showCompass: false }), 'bottom-right');
 
@@ -243,6 +242,7 @@ document.addEventListener('DOMContentLoaded', () => {
 
     map.on('load', () => {
         loadStateFromLocalStorage();
+        setupMapWaypointListeners();
     });
 
     setupEvents();
@@ -250,7 +250,6 @@ document.addEventListener('DOMContentLoaded', () => {
     requestWakeLock();
 });
 
-// Registro do Service Worker
 if ('serviceWorker' in navigator && window.location.protocol.startsWith('http')) {
     window.addEventListener('load', () => {
         navigator.serviceWorker.register('./sw.js')

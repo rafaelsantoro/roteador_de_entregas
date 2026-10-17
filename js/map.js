@@ -12,6 +12,144 @@ let animDuration = 1000;
 let lastGpsTimestamp = 0;
 let cachedCityState = null;
 
+/* --- GESTÃO DE ÂNCORAS CUSTOMIZADAS DA ROTA --- */
+let isAnchorMode = false;
+let touchStartPoint = null;
+let customWaypoints = [];
+let customWaypointMarkers = [];
+let longPressTimer = null;
+
+function toggleAnchorMode(forceState) {
+    if (isNavMode) {
+        customAlert("Saia do modo navegação para gerenciar âncoras.", "Aviso", "fa-compass");
+        return;
+    }
+
+    isAnchorMode = (typeof forceState === 'boolean') ? forceState : !isAnchorMode;
+    const btn = document.getElementById('btn-anchor-toggle');
+
+    if (btn) {
+        if (isAnchorMode) {
+            btn.className = "absolute bottom-[340px] right-3 z-20 h-11 px-3 bg-purple-600 text-white backdrop-blur-md rounded-full shadow-2xl border-2 border-white flex items-center justify-center space-x-1.5 font-extrabold text-xs active:scale-95 transition ring-4 ring-purple-600/40";
+        } else {
+            btn.className = "absolute bottom-[340px] right-3 z-20 h-11 px-3 bg-slate-900/90 hover:bg-slate-800 text-purple-400 backdrop-blur-md rounded-full shadow-2xl border border-slate-700 flex items-center justify-center space-x-1.5 font-extrabold text-xs active:scale-95 transition";
+        }
+    }
+
+    if (map) {
+        map.getCanvas().style.cursor = isAnchorMode ? 'crosshair' : '';
+    }
+}
+
+function setupMapWaypointListeners() {
+    if (!map) return;
+
+    // Desativa o menu de contexto nativo no canvas para não travar no PC
+    const canvas = map.getCanvas();
+    canvas.addEventListener('contextmenu', (e) => e.preventDefault());
+
+    // 1. Clique Direto no Modo Âncora (PC e Mobile)
+    map.on('click', (e) => {
+        if (isAnchorMode && e.lngLat) {
+            addCustomWaypoint(e.lngLat.lat, e.lngLat.lng);
+        }
+    });
+
+    // 2. Clique com Botão Direito no PC
+    map.on('contextmenu', (e) => {
+        if (e.lngLat) {
+            addCustomWaypoint(e.lngLat.lat, e.lngLat.lng);
+        }
+    });
+
+    // 3. Toque Longo no Celular com tolerância a micro-movimentos (10px)
+    map.on('touchstart', (e) => {
+        const origEvent = e.originalEvent || e;
+        if (origEvent.touches && origEvent.touches.length > 1) return;
+        touchStartPoint = e.point;
+
+        longPressTimer = setTimeout(() => {
+            if (e.lngLat) {
+                addCustomWaypoint(e.lngLat.lat, e.lngLat.lng);
+                if ('vibrate' in navigator) navigator.vibrate(50);
+            }
+        }, 600);
+    });
+
+    map.on('touchmove', (e) => {
+        if (!touchStartPoint) return;
+        const dx = e.point.x - touchStartPoint.x;
+        const dy = e.point.y - touchStartPoint.y;
+        if (Math.sqrt(dx * dx + dy * dy) > 10) {
+            clearTimeout(longPressTimer);
+        }
+    });
+
+    map.on('touchend', () => clearTimeout(longPressTimer));
+}
+
+function addCustomWaypoint(lat, lng) {
+    if (isNavMode) {
+        customAlert("Saia do modo navegação para adicionar âncoras.", "Aviso", "fa-compass");
+        return;
+    }
+
+    const id = customWaypoints.length + 1;
+    const wp = { id, lat, lng };
+    customWaypoints.push(wp);
+
+    const el = document.createElement('div');
+    el.className = 'custom-marker-wrapper';
+    el.innerHTML = `
+        <div class="flex items-center justify-center px-2 py-1 rounded-full bg-purple-600 text-white font-extrabold text-xs border-2 border-white shadow-2xl ring-4 ring-purple-600/30 space-x-1 animate-bounce">
+            <i class="fa-solid fa-anchor text-[11px]"></i>
+            <span class="text-[11px] font-black leading-none">${id}</span>
+        </div>
+    `;
+
+    const marker = new maplibregl.Marker({ element: el })
+        .setLngLat([lng, lat])
+        .addTo(map);
+
+    customWaypointMarkers.push(marker);
+    updateWaypointGuideLine();
+    updateAnchorBadgeCount();
+}
+
+function clearCustomWaypoints() {
+    customWaypointMarkers.forEach(m => m.remove());
+    customWaypointMarkers = [];
+    customWaypoints = [];
+    updateWaypointGuideLine();
+    updateAnchorBadgeCount();
+    if (isAnchorMode) toggleAnchorMode(false);
+}
+
+function updateAnchorBadgeCount() {
+    const badge = document.getElementById('anchor-count-badge');
+    if (badge) badge.textContent = customWaypoints.length;
+}
+
+function updateWaypointGuideLine() {
+    if (!map) return;
+    const coords = customWaypoints.map(w => [w.lng, w.lat]);
+    const geom = coords.length > 1 ? { 'type': 'LineString', 'coordinates': coords } : { 'type': 'LineString', 'coordinates': [] };
+
+    _setGeoSource('waypoint-guide-source', geom);
+
+    try {
+        if (!map.getLayer('waypoint-guide-layer')) {
+            map.addLayer({
+                'id': 'waypoint-guide-layer',
+                'type': 'line',
+                'source': 'waypoint-guide-source',
+                'layout': { 'line-join': 'round', 'line-cap': 'round' },
+                'paint': { 'line-color': '#a855f7', 'line-width': 4, 'line-dasharray': [2, 2], 'line-opacity': 0.8 }
+            });
+        }
+    } catch (e) {}
+}
+
 function boostMapTextLabels() {
     if (!map || isTextBoosted) return;
     const style = map.getStyle();
@@ -279,7 +417,6 @@ function onGpsSuccess(position) {
 
     startNavAnimationLoop();
 
-    // Linha de guia da navegação: usa o trecho planejado salvo no aparelho e só consulta a internet em caso de desvio real
     onNavGpsUpdate(lat, lng);
 }
 
@@ -422,14 +559,12 @@ function selectSearchResult(lat, lng, name) {
     toggleSearchBox(false);
     if (searchMarker) searchMarker.remove();
 
-    // Dá ~10 s para escolher (App / Waze / G. Maps) sem a câmera voltar para o GPS
     followPausedUntil = Date.now() + FOLLOW_PAUSE_MS;
     suppressFitUntil = Date.now() + FOLLOW_PAUSE_MS;
 
     const el = document.createElement('div');
     el.innerHTML = '<div class="w-8 h-8 rounded-full bg-rose-600 border-2 border-white text-white flex items-center justify-center shadow-lg"><i class="fa-solid fa-flag-checkered text-xs"></i></div>';
 
-    // Popup montado sem innerHTML: nomes vindos do OpenStreetMap não podem injetar código
     const makeBtn = (cls, icon, label, handler) => {
         const b = document.createElement('button');
         b.className = cls;
@@ -464,7 +599,6 @@ function selectSearchResult(lat, lng, name) {
         .setPopup(new maplibregl.Popup({ closeButton: false, offset: 25 }).setDOMContent(box))
         .addTo(map);
 
-    // Só troca de aba se o mapa ainda não estiver na tela (trocar reenquadrava o mapa nas entregas)
     const mapPanel = document.getElementById('map-panel');
     if (window.innerWidth < 768 && mapPanel && mapPanel.classList.contains('hidden')) switchMobileTab('map');
 
@@ -473,7 +607,7 @@ function selectSearchResult(lat, lng, name) {
 }
 
 async function navigateToSearchLocation(lat, lng, name, isRecalc = false) {
-    followPausedUntil = 0; // escolheu ir até lá: a câmera volta a seguir o GPS
+    followPausedUntil = 0;
     suppressFitUntil = 0;
     if (!isRecalc && window.innerWidth < 768) {
         switchMobileTab('map');
@@ -516,7 +650,7 @@ async function navigateToSearchLocation(lat, lng, name, isRecalc = false) {
         isFallbackOrigin = false;
     } else {
         startCoord = [FIXED_PK2U.lng, FIXED_PK2U.lat];
-        isFallbackOrigin = true; // Rota iniciada com ponto temporário
+        isFallbackOrigin = true;
     }
 
     const endCoord = [lng, lat];
@@ -620,15 +754,12 @@ function updateRouteOnMap() {
 
     const empty = { 'type': 'LineString', 'coordinates': [] };
 
-    // Rota planejada: apenas trechos reais entre as entregas (já salvos no aparelho)
     const knownLegs = (plannedLegGeoms || []).filter(g => g && g.length > 1);
     const plannedGeom = knownLegs.length ? { 'type': 'MultiLineString', 'coordinates': knownLegs } : empty;
 
-    // Trechos ainda não baixados: tracejado cinza, para nunca parecer uma rota de verdade
     const gapGeom = (plannedGapSegments && plannedGapSegments.length)
         ? { 'type': 'MultiLineString', 'coordinates': plannedGapSegments } : empty;
 
-    // Guia da navegação (veículo -> próxima entrega)
     const hasNav = isNavMode && fullNavRouteGeometry && fullNavRouteGeometry.coordinates && fullNavRouteGeometry.coordinates.length > 1;
     const navRouted = (hasNav && !navGuideIsStraight) ? fullNavRouteGeometry : empty;
     const navStraight = (hasNav && navGuideIsStraight) ? fullNavRouteGeometry : empty;
@@ -714,7 +845,6 @@ function updateRouteOnMap() {
     } catch (e) {}
 }
 
-// Atualização leve (1x por segundo): mexe só na linha de guia, sem redesenhar a rota inteira
 function updateNavLayer() {
     if (!map || !map.getSource('nav-source') || !map.getSource('nav-straight-source')) {
         updateRouteOnMap();
@@ -829,10 +959,10 @@ async function renderMapAndUI(points, fetchRoads = true) {
             updateNavSegmentRoute();
         }
     } else if (fetchRoads) {
-        await buildPlannedRoute(points, true);   // baixa cada trecho uma vez e guarda no aparelho
+        await buildPlannedRoute(points, true);
         updateRouteOnMap();
 
-        updateRouteSummaryUI(); // km e tempo ficam fixos na barra superior
+        updateRouteSummaryUI();
     } else {
         updateRouteOnMap();
     }
@@ -855,15 +985,13 @@ function focusOnPoint(idx) {
     if (marker) marker.togglePopup();
 }
 
-
 /* --- PRÉ-CARREGAMENTO DA ÁREA URBANA DE AVARÉ (OFFLINE) --- */
 
-// Limites Geográficos (Bounding Box) da Área Urbana de Avaré - SP
 const AVARE_URBAN_BBOX = {
-    southLat: -23.135, // Limite Sul (Entrada de Cerqueira César / SP-255)
-    northLat: -23.070, // Limite Norte (Bairro Brabância / Distrito Industrial)
-    westLng:  -48.965, // Limite Oeste (Camargo)
-    eastLng:  -48.885  // Limite Leste (Planalto)
+    southLat: -23.135,
+    northLat: -23.070,
+    westLng:  -48.965,
+    eastLng:  -48.885
 };
 
 function lng2tile(lon, zoom) {
@@ -890,7 +1018,6 @@ async function downloadAvareUrbanMap(minZoom = 14, maxZoom = 17) {
 
         for (let x = xMin; x <= xMax; x++) {
             for (let y = yMin; y <= yMax; y++) {
-                // Monta a URL dos tiles com a chave da CARTO
                 const tileUrl = CARTO_RASTER_URL.replace('{z}', z).replace('{x}', x).replace('{y}', y);
                 urlsToFetch.add(tileUrl);
             }
@@ -930,28 +1057,19 @@ async function downloadAvareUrbanMap(minZoom = 14, maxZoom = 17) {
     }
 }
 
-
 /* --- SIMULADOR DE NAVEGAÇÃO (TESTE VISUAL PONTO A -> PONTO B) --- */
-/* Para iniciar aperte F12 e em seguida digite: runDemoNavigation(); */
-/* Para parar: stopDemoNavigation(); */
-
 
 let demoIntervalId = null;
 
 async function runDemoNavigation() {
-    // Para qualquer simulação em andamento
     stopDemoNavigation();
 
-    // Coordenadas de teste em Avaré - SP
-    // Ponto A: Centro / Largo São João
     const pointA = { lat: -23.1025, lng: -48.9555 }; 
-    // Ponto B: Avenida Paranapanema
     const pointB = { lat: -23.1130, lng: -48.9280 }; 
 
     showLoading("A gerar rota de teste Avaré...");
 
     try {
-        // 1. Busca rota real entre o Ponto A e Ponto B no OpenRouteService
         const response = await fetch('https://api.openrouteservice.org/v2/directions/driving-car/geojson', {
             method: 'POST',
             headers: {
@@ -974,14 +1092,13 @@ async function runDemoNavigation() {
         }
 
         const data = await response.json();
-        const coords = data.features[0].geometry.coordinates; // Array de [lng, lat]
+        const coords = data.features[0].geometry.coordinates;
 
         if (!coords || coords.length < 2) {
             await customAlert("Rota não encontrada.");
             return;
         }
 
-        // 2. Ativa Modos de Navegação e 3D
         isNavMode = true;
         if (!is3DMode) toggle3DMode();
 
@@ -990,12 +1107,10 @@ async function runDemoNavigation() {
         document.getElementById('nav-next-title').textContent = 'Ponto A → Ponto B';
         document.getElementById('nav-next-address').textContent = 'Av. Paranapanema - Avaré';
 
-        // Configura as geometrias globais da rota
         fullNavRouteGeometry = { 'type': 'LineString', 'coordinates': coords };
         navGuideIsStraight = false;
         updateRouteOnMap();
 
-        // 3. Inicia loop de simulação de movimento do veículo a cada 1.2s
         let stepIndex = 0;
 
         demoIntervalId = setInterval(async () => {
@@ -1008,19 +1123,17 @@ async function runDemoNavigation() {
             const currentCoord = coords[stepIndex];
             const nextCoord = coords[Math.min(stepIndex + 1, coords.length - 1)];
 
-            // Calcula a direção em graus (heading) para a próxima curva
             const heading = calculateBearing(
                 currentCoord[1], currentCoord[0],
                 nextCoord[1], nextCoord[0]
             );
 
-            // Injeta posição simulada na função real do GPS
             onGpsSuccess({
                 coords: {
                     latitude: currentCoord[1],
                     longitude: currentCoord[0],
                     heading: heading,
-                    speed: 10 // ~36 km/h
+                    speed: 10
                 }
             });
 
