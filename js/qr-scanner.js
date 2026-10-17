@@ -34,7 +34,7 @@ function updateQrCounterUI() {
 
 async function openQrScannerModal() {
     if (!activePoints || activePoints.length === 0) {
-        alert("Carregue uma planilha e otimize a rota antes de escanear os pacotes.");
+        await customAlert("Carregue uma planilha e otimize a rota antes de escanear os pacotes.");
         return;
     }
 
@@ -67,7 +67,7 @@ async function openQrScannerModal() {
         try {
             await html5QrCode.start({ facingMode: "user" }, config, onQrCodeScanned, onQrCodeError);
         } catch (err2) {
-            alert("Erro ao acessar a câmera do dispositivo: " + err2.message);
+            await customAlert("Erro ao acessar a câmera do dispositivo: " + err2.message);
         }
     }
 }
@@ -125,8 +125,8 @@ function onQrCodeScanned(decodedText, decodedResult) {
         if (scannedTotal === total) {
             if ('vibrate' in navigator) navigator.vibrate([150, 100, 150, 100, 200]);
             // Exibe mensagem de comemoração sem fechar a tela
-            setTimeout(() => {
-                alert(`🎉 PARABÉNS!\n\nTodos os ${total} pacotes do dia foram escaneados e conferidos com sucesso!`);
+            setTimeout(async () => {
+                await customAlert("🎉 PARABÉNS!\n\nTodos os ${total} pacotes do dia foram escaneados e conferidos com sucesso!", "Concluído", "fa-circle-check");
             }, 300);
         }
 
@@ -184,7 +184,7 @@ async function closeQrScannerModal() {
                     `Pacotes pendentes: ${missingNumbersStr}\n\n` +
                     `Deseja fechar o scanner assim mesmo?`;
 
-        if (!confirm(msg)) {
+        if (!await customConfirm(msg, "Conferência Incompleta")) {
             return; // Cancela o fechamento e permanece no leitor
         }
     }

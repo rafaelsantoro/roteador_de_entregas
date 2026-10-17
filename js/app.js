@@ -52,7 +52,7 @@ function initLocalSettingsUI() {
     }
 }
 
-function saveLocalSettingsFromUI() {
+async function saveLocalSettingsFromUI() {
     const key = (document.getElementById('setting-ors-key').value || '').trim();
     const homeTxt = (document.getElementById('setting-home').value || '').trim();
     const patch = { orsKey: key, home: null };
@@ -62,22 +62,28 @@ function saveLocalSettingsFromUI() {
         const lat = parseFloat(parts[0]);
         const lng = parseFloat(parts[1]);
         if (parts.length < 2 || !isFinite(lat) || !isFinite(lng) || Math.abs(lat) > 90 || Math.abs(lng) > 180) {
-            alert('Casa: informe "latitude, longitude" com ponto decimal (ex.: -23.0864, -48.9187).');
+            await customAlert('Casa: informe "latitude, longitude" com ponto decimal (ex.: -23.0864, -48.9187).');
             return;
         }
         patch.home = { lat, lng };
     }
 
     saveLocalSettings(patch);
-    alert('Configurações salvas neste aparelho. O app será recarregado para aplicar.');
+    if (document.fullscreenElement) {
+        sessionStorage.setItem('restore_fullscreen', 'true');
+    }
+    await customAlert('Configurações salvas neste aparelho. O app será recarregado para aplicar.');
     location.reload();
 }
 
 async function clearLocalData() {
-    if (!confirm('Apagar deste aparelho a planilha, a rota salva e os trechos de rua baixados?\n\nA chave de API e a Casa (configurações) serão mantidas.')) return;
+    if (!await customConfirm('Apagar deste aparelho a planilha, a rota salva e os trechos de rua baixados?\n\nA chave de API e a Casa (configurações) serão mantidas.')) return;
     localStorage.removeItem(STORAGE_KEY);
     await Store.clearPrefix('leg:');
     await Store.clearPrefix('mx:');
+    if (document.fullscreenElement) {
+        sessionStorage.setItem('restore_fullscreen', 'true');
+    }
     location.reload();
 }
 
@@ -114,7 +120,7 @@ function loadStateFromLocalStorage() {
 
         rawData = state.rawData || [];
         activePoints = state.activePoints || [];
-        routeIsOptimized = !!state.optimized || !!state.routeGeometry; // estados antigos tinham routeGeometry
+        routeIsOptimized = !!state.optimized || !!state.routeGeometry;
         currentRouteDistanceKm = state.routeDistanceKm || '0';
 
         populateSelect(rawData);
@@ -141,8 +147,8 @@ function loadStateFromLocalStorage() {
 
         if (activePoints.length > 0) {
             updateRouteOnMap();
-            restorePlannedRoute(); // lê os trechos salvos no aparelho; só usa internet se faltar algum
-            updateRouteSummaryUI(); // km e tempo na barra superior (valor salvo, antes mesmo dos trechos carregarem)
+            restorePlannedRoute();
+            updateRouteSummaryUI();
         }
     } catch (e) {
         console.error("Erro local storage:", e);
@@ -150,9 +156,9 @@ function loadStateFromLocalStorage() {
     }
 }
 
-// Event Listeners Globais de Inicialização
-document.addEventListener('click', enableAutoFullscreen, { once: true });
-document.addEventListener('touchstart', enableAutoFullscreen, { once: true });
+// Event Listeners Globais de Inicialização (Sem 'once: true' para reativar tela cheia a cada toque se o usuário desejar)
+document.addEventListener('click', enableAutoFullscreen);
+document.addEventListener('touchstart', enableAutoFullscreen);
 
 document.addEventListener('visibilitychange', async () => {
     if (document.visibilityState === 'visible') {
@@ -162,12 +168,20 @@ document.addEventListener('visibilitychange', async () => {
 
 document.addEventListener('fullscreenchange', () => {
     const icon = document.getElementById('fullscreen-icon');
-    if (icon) {
-        icon.className = document.fullscreenElement ? "fa-solid fa-compress" : "fa-solid fa-expand";
+    if (document.fullscreenElement) {
+        userWantsFullscreen = true;
+        if (icon) icon.className = "fa-solid fa-compress";
+    } else {
+        if (icon) icon.className = "fa-solid fa-expand";
     }
 });
 
 document.addEventListener('DOMContentLoaded', () => {
+    if (sessionStorage.getItem('restore_fullscreen') === 'true') {
+        userWantsFullscreen = true;
+        sessionStorage.removeItem('restore_fullscreen');
+    }
+
     checkInternetConnection();
     window.addEventListener('online', checkInternetConnection);
     window.addEventListener('offline', checkInternetConnection);
@@ -178,40 +192,43 @@ document.addEventListener('DOMContentLoaded', () => {
         if (warnBox) warnBox.classList.remove('hidden');
     }
 
-map = new maplibregl.Map({
-        container: 'map',
-        maxZoom: 20,
-        style: {
-            version: 8,
-            sources: {
-                'carto-tiles': {
-                    type: 'raster',
-                    tiles: [
-                        CARTO_RASTER_URL
-                    ],
-                    tileSize: 256,
-                    maxzoom: 19,
-                    attribution: '&copy; <a href="https://carto.com/">CARTO</a> &copy; <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a>'
-                }
-            },
-            layers: [
-                {
-                    id: 'carto-tiles-layer',
-                    type: 'raster',
-                    source: 'carto-tiles',
-                    minzoom: 0,
-                    maxzoom: 22
-                }
-            ]
-        },
-        pixelRatio: window.devicePixelRatio || 2,
-        center: [-48.91, -23.10],
-        zoom: 16
-    });
+	map = new maplibregl.Map({
+		container: 'map',
+		fadeDuration: 0, // Desativa o tempo global de transição da renderização
+		maxZoom: 20,
+		style: {
+			version: 8,
+			sources: {
+				'carto-tiles': {
+					type: 'raster',
+					tiles: [
+						CARTO_RASTER_URL
+					],
+					tileSize: 256,
+					maxzoom: 19,
+					attribution: '&copy; <a href="https://carto.com/">CARTO</a> &copy; <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a>'
+				}
+			},
+			layers: [
+				{
+					id: 'carto-tiles-layer',
+					type: 'raster',
+					source: 'carto-tiles',
+					minzoom: 0,
+					maxzoom: 22,
+					paint: {
+						'raster-fade-duration': 0 // Elimina a transição gradual de 300ms nos tiles
+					}
+				}
+			]
+		},
+		pixelRatio: window.devicePixelRatio || 2,
+		center: [-48.91, -23.10],
+		zoom: 16
+	});
 
     map.addControl(new maplibregl.NavigationControl({ showCompass: false }), 'bottom-right');
 
-    // Se você arrastar ou der zoom, a câmera para de seguir o GPS por 10 s (dá tempo de olhar o mapa)
     const pauseFollow = (ev) => { if (ev && ev.originalEvent) followPausedUntil = Date.now() + FOLLOW_PAUSE_MS; };
     map.on('dragstart', pauseFollow);
     map.on('zoomstart', pauseFollow);

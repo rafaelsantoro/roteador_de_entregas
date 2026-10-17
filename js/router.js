@@ -381,7 +381,7 @@ async function restorePlannedRoute() {
 async function retryMissingLegs(manual = false) {
     if (_legsBusy || !activePoints || activePoints.length === 0) return;
     if (!navigator.onLine) {
-        if (manual) alert('Sem internet no momento. Tente novamente quando houver sinal.');
+        if (manual) await customAlert('Sem internet no momento. Tente novamente quando houver sinal.', 'Sem Conexão', 'fa-wifi');
         return;
     }
     _legsBusy = true;
@@ -573,7 +573,7 @@ async function updateNavSegmentRoute(forceIdx = null) {
     if (nextIdx === -1) {
         const pendingCount = activePoints.filter(p => p.status === 'pending').length;
         if (pendingCount === 0) {
-            alert("Parabéns! Todas as entregas da lista foram concluídas.");
+            await customAlert("🎉 Parabéns! Todas as entregas da lista foram concluídas com sucesso.", "Entregas Concluídas", "fa-circle-check");
             if (isNavMode) toggleNavigationMode();
             return;
         }
@@ -633,7 +633,7 @@ async function updateNavSegmentRoute(forceIdx = null) {
     }
 }
 
-function skipCurrentDelivery() {
+async function skipCurrentDelivery() {
     if (!activePoints || activePoints.length === 0) return;
 
     let nextIdx = -1;
@@ -654,7 +654,7 @@ function skipCurrentDelivery() {
     }
 
     if (nextIdx === -1 || nextIdx === currentNavIndex) {
-        alert("Não há outras entregas pendentes na lista para pular.");
+        await customAlert("Não há outras entregas pendentes na lista para pular.", "Aviso", "fa-triangle-exclamation");
         return;
     }
 
@@ -745,7 +745,7 @@ function handleFile(file) {
     showLoading("Lendo todas as abas da planilha...");
     const reader = new FileReader();
 
-    reader.onload = function(e) {
+    reader.onload = async function(e) {
         try {
             const data = new Uint8Array(e.target.result);
             const workbook = XLSX.read(data, { type: 'array' });
@@ -757,9 +757,9 @@ function handleFile(file) {
                 json = json.concat(sheetJson);
             });
 
-            parseAndValidateData(json);
+            await parseAndValidateData(json);
         } catch (err) {
-            alert("Erro ao ler arquivo Excel: " + err.message);
+            await customAlert("Erro ao ler arquivo Excel: " + err.message, "Erro", "fa-circle-xmark");
         } finally {
             hideLoading();
         }
@@ -778,7 +778,7 @@ function populateSelect(deliveries) {
     });
 }
 
-function parseAndValidateData(json) {
+async function parseAndValidateData(json) {
     rawData = [];
     let skippedCount = 0;
     
@@ -808,7 +808,7 @@ function parseAndValidateData(json) {
                 lat: lat,
                 lng: lng,
                 status: 'pending',
-				scanned: false // Indica se o pacote foi conferido via QR Code
+                scanned: false // Indica se o pacote foi conferido via QR Code
             });
         } else {
             skippedCount++;
@@ -818,7 +818,7 @@ function parseAndValidateData(json) {
     assignStreetKeys(rawData);
 
     if (rawData.length === 0) {
-        alert("Nenhuma coordenada válida encontrada na planilha! Verifique se as colunas Latitude e Longitude estão preenchidas.");
+        await customAlert("Nenhuma coordenada válida encontrada na planilha! Verifique se as colunas Latitude e Longitude estão preenchidas.", "Erro na Planilha", "fa-circle-xmark");
         return;
     }
 
@@ -842,11 +842,11 @@ function parseAndValidateData(json) {
 
 async function optimizeAndDrawRoute() {
     if (!rawData || rawData.length === 0) {
-        alert("Carregue uma planilha XLSX antes de otimizar a rota.");
+        await customAlert("Carregue uma planilha XLSX antes de otimizar a rota.", "Aviso", "fa-file-excel");
         return;
     }
     if (isNavMode) {
-        alert("Saia do modo navegação antes de otimizar a rota.");
+        await customAlert("Saia do modo navegação antes de otimizar a rota.", "Aviso", "fa-compass");
         return;
     }
 
@@ -854,13 +854,14 @@ async function optimizeAndDrawRoute() {
     if (routeIsOptimized) {
         const hasProgress = activePoints.some(p => p.status !== 'pending');
         const msg = hasProgress
-            ? "ATENÇÃO: a rota já está em andamento.\n\nOtimizar de novo pode MUDAR A NUMERAÇÃO dos pacotes e eles deixarão de bater com a ordem que você já separou.\n\nTem certeza que deseja continuar?"
-            : "Esta rota já foi otimizada.\n\nOtimizar de novo pode mudar a numeração dos pacotes que você já separou.\n\nDeseja continuar?";
-        if (!confirm(msg)) return;
+            ? "ATENÇÃO: a rota já está em andamento.<br><br>Otimizar de novo pode <b>MUDAR A NUMERAÇÃO</b> dos pacotes e eles deixarão de bater com a ordem que você já separou.<br><br>Tem certeza que deseja continuar?"
+            : "Esta rota já foi otimizada.<br><br>Otimizar de novo pode mudar a numeração dos pacotes que você já separou.<br><br>Deseja continuar?";
+        const confirmed = await customConfirm(msg, "Reotimizar Rota", "fa-triangle-exclamation");
+        if (!confirmed) return;
     }
 
     if (!navigator.onLine) {
-        const ok = confirm("Sem internet: a ordem será calculada por estimativa em linha reta (menos precisa) e as ruas não poderão ser baixadas.\n\nO ideal é otimizar com internet, antes de sair.\n\nContinuar mesmo assim?");
+        const ok = await customConfirm("Sem internet: a ordem será calculada por estimativa em linha reta (menos precisa) e as ruas não poderão ser baixadas.<br><br>O ideal é otimizar com internet, antes de sair.<br><br>Continuar mesmo assim?", "Sem Internet", "fa-wifi");
         if (!ok) return;
     }
 
@@ -877,11 +878,11 @@ async function optimizeAndDrawRoute() {
         document.getElementById('btn-qrcode-scan').disabled = false;
 
         if (lastSolveInfo && lastSolveInfo.estimatedTiles > 0) {
-            alert("Parte dos tempos de viagem foi estimada em linha reta por falta de internet. A ordem pode ficar menos precisa.");
+            await customAlert("Parte dos tempos de viagem foi estimada em linha reta por falta de internet. A ordem pode ficar menos precisa.", "Aviso", "fa-triangle-exclamation");
         }
     } catch (err) {
         console.error("Erro na otimização:", err);
-        alert("Erro ao otimizar a rota: " + err.message);
+        await customAlert("Erro ao otimizar a rota: " + err.message, "Erro na Otimização", "fa-circle-xmark");
     } finally {
         hideLoading();
     }
@@ -937,9 +938,9 @@ function escapeXml(str) {
     });
 }
 
-function exportToGPX() {
+async function exportToGPX() {
     if (!activePoints || activePoints.length === 0) {
-        alert("Nenhuma rota para exportar! Carregue a planilha primeiro.");
+        await customAlert("Nenhuma rota para exportar! Carregue a planilha primeiro.", "Aviso", "fa-file-export");
         return;
     }
 

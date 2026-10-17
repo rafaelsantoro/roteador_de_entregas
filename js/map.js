@@ -118,7 +118,7 @@ function toggle3DMode() {
     }
 }
 
-function toggleGPS() {
+async function toggleGPS() {
     const btn = document.getElementById('btn-gps-toggle');
     const icon = document.getElementById('gps-icon');
 
@@ -143,7 +143,7 @@ function toggleGPS() {
         icon.className = "fa-solid fa-location-crosshairs";
     } else {
         if (!navigator.geolocation) {
-            alert("A geolocalização não é suportada por este navegador/dispositivo.");
+            await customAlert("A geolocalização não é suportada por este navegador/dispositivo.");
             return;
         }
 
@@ -283,7 +283,7 @@ function onGpsSuccess(position) {
     onNavGpsUpdate(lat, lng);
 }
 
-function onGpsError(err) {
+async function onGpsError(err) {
     hideLoading();
     let msg = "Erro ao obter localização.";
     switch(err.code) {
@@ -297,7 +297,7 @@ function onGpsError(err) {
             msg = "Tempo esgotado ao buscar o sinal GPS.";
             break;
     }
-    alert(msg);
+    await customAlert(msg, "Erro no GPS", "fa-location-crosshairs");
     toggleGPS();
 }
 
@@ -876,7 +876,7 @@ function lat2tile(lat, zoom) {
 
 async function downloadAvareUrbanMap(minZoom = 14, maxZoom = 17) {
     if (!navigator.onLine) {
-        alert("Necessita de estar ligado à internet para descarregar o mapa offline.");
+        await customAlert("Necessita de estar ligado à internet para descarregar o mapa offline.");
         return;
     }
 
@@ -921,10 +921,10 @@ async function downloadAvareUrbanMap(minZoom = 14, maxZoom = 17) {
             showLoading(`A descarregar Avaré Offline (${Math.min(downloaded, totalTiles)}/${totalTiles})...`);
         }
 
-        alert(`Download concluído! O mapa urbano de Avaré (${totalTiles} imagens) foi guardado com sucesso via CARTO.`);
+        await customAlert(`Download concluído! O mapa urbano de Avaré (${totalTiles} imagens) foi guardado com sucesso via CARTO.`);
     } catch (e) {
         console.error("Erro ao guardar mapa offline:", e);
-        alert("Ocorreu uma falha ao guardar o mapa offline.");
+        await customAlert("Ocorreu uma falha ao guardar o mapa offline.", "Erro", "fa-triangle-exclamation");
     } finally {
         hideLoading();
     }
@@ -969,7 +969,7 @@ async function runDemoNavigation() {
         hideLoading();
 
         if (!response.ok) {
-            alert("Erro ao obter rota da API ORS. Verifique a chave de API.");
+            await customAlert("Erro ao obter rota da API ORS. Verifique a chave de API.");
             return;
         }
 
@@ -977,7 +977,7 @@ async function runDemoNavigation() {
         const coords = data.features[0].geometry.coordinates; // Array de [lng, lat]
 
         if (!coords || coords.length < 2) {
-            alert("Rota não encontrada.");
+            await customAlert("Rota não encontrada.");
             return;
         }
 
@@ -998,10 +998,10 @@ async function runDemoNavigation() {
         // 3. Inicia loop de simulação de movimento do veículo a cada 1.2s
         let stepIndex = 0;
 
-        demoIntervalId = setInterval(() => {
+        demoIntervalId = setInterval(async () => {
             if (stepIndex >= coords.length) {
                 stopDemoNavigation();
-                alert("Simulação concluída! Chegou ao destino (Ponto B).");
+                await customAlert("Simulação concluída! Chegou ao destino (Ponto B).");
                 return;
             }
 
@@ -1030,7 +1030,7 @@ async function runDemoNavigation() {
     } catch (err) {
         hideLoading();
         console.error("Erro na simulação:", err);
-        alert("Falha ao iniciar simulação de navegação.");
+        await customAlert("Falha ao iniciar simulação de navegação.");
     }
 }
 

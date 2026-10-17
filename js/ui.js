@@ -1,5 +1,7 @@
 /* --- INTERFACE E ELEMENTOS VISUAIS --- */
 
+let userWantsFullscreen = false; // Memoriza a intenção do usuário de manter a tela cheia
+
 // Escapa texto vindo da planilha/internet antes de colocá-lo em HTML (evita injeção de código)
 function escapeHtml(value) {
     return String(value == null ? '' : value).replace(/[&<>"']/g, c => ({
@@ -19,18 +21,23 @@ function checkInternetConnection() {
 }
 
 function enableAutoFullscreen() {
-    if (!document.fullscreenElement) {
-        document.documentElement.requestFullscreen().catch(() => {});
+    if (userWantsFullscreen && !document.fullscreenElement) {
+        // O catch evita que o erro pare a execução das outras funções do aplicativo
+        document.documentElement.requestFullscreen().catch((err) => {
+            // Rejeição normal do navegador quando não há gesto direto
+        });
     }
 }
 
 function toggleFullscreen() {
     const icon = document.getElementById('fullscreen-icon');
     if (!document.fullscreenElement) {
+        userWantsFullscreen = true;
         document.documentElement.requestFullscreen().then(() => {
             if (icon) icon.className = "fa-solid fa-compress";
         }).catch(() => {});
     } else {
+        userWantsFullscreen = false; // O usuário solicitou explicitamente sair da tela cheia
         if (document.exitFullscreen) {
             document.exitFullscreen().then(() => {
                 if (icon) icon.className = "fa-solid fa-expand";
@@ -161,4 +168,53 @@ function showLoading(text) {
 
 function hideLoading() {
     document.getElementById('loading-overlay').classList.add('hidden');
+}
+
+function customAlert(message, title = "Aviso", icon = "fa-circle-info") {
+    return new Promise((resolve) => {
+        const modal = document.getElementById('custom-dialog-modal');
+        document.getElementById('custom-dialog-title').textContent = title;
+        document.getElementById('custom-dialog-message').textContent = message;
+        document.getElementById('custom-dialog-icon').className = `fa-solid ${icon}`;
+        
+        const btnCancel = document.getElementById('custom-dialog-cancel');
+        const btnConfirm = document.getElementById('custom-dialog-confirm');
+
+        btnCancel.classList.add('hidden');
+        btnConfirm.textContent = 'OK';
+
+        modal.classList.remove('hidden');
+
+        btnConfirm.onclick = () => {
+            modal.classList.add('hidden');
+            resolve(true);
+        };
+    });
+}
+
+function customConfirm(message, title = "Confirmação", icon = "fa-triangle-exclamation") {
+    return new Promise((resolve) => {
+        const modal = document.getElementById('custom-dialog-modal');
+        document.getElementById('custom-dialog-title').textContent = title;
+        document.getElementById('custom-dialog-message').textContent = message;
+        document.getElementById('custom-dialog-icon').className = `fa-solid ${icon}`;
+        
+        const btnCancel = document.getElementById('custom-dialog-cancel');
+        const btnConfirm = document.getElementById('custom-dialog-confirm');
+
+        btnCancel.classList.remove('hidden');
+        btnConfirm.textContent = 'Confirmar';
+
+        modal.classList.remove('hidden');
+
+        const close = (result) => {
+            modal.classList.add('hidden');
+            btnConfirm.onclick = null;
+            btnCancel.onclick = null;
+            resolve(result);
+        };
+
+        btnConfirm.onclick = () => close(true);
+        btnCancel.onclick = () => close(false);
+    });
 }
