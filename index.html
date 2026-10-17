@@ -22,7 +22,7 @@
     <!-- Folha de Estilos Externa -->
     <link rel="stylesheet" href="css/styles.css">
 
-    <!-- Scripts Modulares JS (A criar nos próximos passos) -->
+    <!-- Scripts Modulares JS -->
     <script src="js/config.js" defer></script>
     <script src="js/store.js" defer></script>
     <script src="js/ui.js" defer></script>
@@ -60,8 +60,7 @@
             <button onclick="toggleFullscreen()" title="Alternar Tela Cheia" class="bg-slate-800 hover:bg-slate-700 text-slate-300 px-2 py-1 rounded-md border border-slate-700 font-semibold text-xs transition flex items-center justify-center">
                 <i class="fa-solid fa-expand" id="fullscreen-icon"></i>
             </button>
-            <!-- Quilometragem e tempo estimado do dia (fixo, em qualquer tela) -->
-            <span id="route-summary" class="hidden bg-slate-800 text-amber-300 px-2.5 py-1 rounded-md border border-slate-700 font-bold text-xs flex items-center whitespace-nowrap" title="Distância total (Casa ➔ PK2U ➔ Entregas ➔ Casa) e tempo estimado">
+            <span id="route-summary" class="hidden bg-slate-800 text-amber-300 px-2.5 py-1 rounded-md border border-slate-700 font-bold text-xs flex items-center whitespace-nowrap" title="Distância total e tempo estimado">
                 <i class="fa-solid fa-road text-amber-400 mr-1.5"></i><span id="route-summary-text">0 km</span>
             </span>
         </div>
@@ -76,11 +75,11 @@
         <button onclick="document.getElementById('offline-warning').classList.add('hidden')" class="text-white font-bold px-2">✕</button>
     </div>
 
-    <!-- Banner de Alerta para ficheiros locais file:// -->
+    <!-- Banner de Alerta para file:// -->
     <div id="file-protocol-warning" class="hidden bg-amber-500 text-slate-950 text-xs font-bold px-3 py-2 flex items-center justify-between shrink-0 z-30">
         <div class="flex items-center space-x-2">
             <i class="fa-solid fa-triangle-exclamation text-base"></i>
-            <span>Atenção: Abrir o HTML direto da memória do dispositivo (file://) pode bloquear o GPS. Use um servidor local se necessário.</span>
+            <span>Atenção: Abrir o HTML direto da memória do dispositivo (file://) pode bloquear o GPS.</span>
         </div>
         <button onclick="document.getElementById('file-protocol-warning').remove()" class="text-slate-900 font-bold px-2">✕</button>
     </div>
@@ -94,21 +93,18 @@
             <!-- Compact Top Bar Header Controls -->
             <div class="p-2.5 border-b border-slate-200 bg-slate-50 shrink-0">
                 <div class="flex items-center space-x-2">
-                    <!-- Botão de Menu Expansível -->
                     <button id="btn-menu-toggle" onclick="toggleMenuConfig()" class="flex-1 bg-slate-800 hover:bg-slate-700 text-white text-xs font-bold py-2 px-2.5 rounded-lg shadow transition flex items-center justify-center space-x-1.5 truncate">
                         <i class="fa-solid fa-bars text-indigo-400"></i>
                         <span>Menu & Opções</span>
                         <i class="fa-solid fa-chevron-down text-[10px] ml-0.5" id="menu-chevron"></i>
                     </button>
 
-                    <!-- Botão de Navegação ao lado do Menu -->
                     <button id="btn-nav-mode-top" onclick="toggleNavigationMode()" class="flex-1 bg-amber-500 hover:bg-amber-600 text-slate-950 text-xs font-bold py-2 px-2.5 rounded-lg shadow transition flex items-center justify-center space-x-1.5 truncate">
                         <i class="fa-solid fa-compass"></i>
                         <span id="nav-mode-top-text">Navegação</span>
                     </button>
                 </div>
 
-                <!-- Mobile Quick Toggle Button -->
                 <button onclick="switchMobileTab('map')" class="md:hidden w-full mt-2 bg-indigo-50 hover:bg-indigo-100 text-indigo-700 border border-indigo-200 text-xs font-bold py-1.5 px-3 rounded-lg flex items-center justify-center space-x-2 transition">
                     <i class="fa-solid fa-map-location-dot text-indigo-600"></i>
                     <span>Ver Mapa em Tela Cheia</span>
@@ -116,7 +112,6 @@
 
                 <!-- Painel Expansível de Configurações -->
 				<div id="collapsible-menu" class="hidden mt-2.5 pt-2.5 border-t border-slate-200 space-y-2 max-h-[70vh] overflow-y-auto custom-scroll pr-1">
-                    <!-- Upload Box -->
                     <div id="drop-zone" class="border-2 border-dashed border-indigo-200 rounded-lg p-2 text-center hover:border-indigo-500 transition cursor-pointer bg-white shadow-sm">
                         <input type="file" id="file-input" accept=".xlsx, .xls" class="hidden">
                         <div class="flex items-center justify-center space-x-2">
@@ -125,7 +120,6 @@
                         </div>
                     </div>
 
-                    <!-- Card de Resumo da Planilha -->
                     <div id="file-summary-card" class="hidden bg-slate-800 text-slate-100 rounded-lg p-2.5 border border-slate-700 text-xs shadow-sm space-y-1">
                         <div class="flex items-center justify-between border-b border-slate-700/80 pb-1 mb-1">
                             <span class="font-bold text-indigo-400 text-[11px] uppercase tracking-wider flex items-center gap-1.5">
@@ -152,7 +146,6 @@
                         </div>
                     </div>
 
-                    <!-- Configs: 1st Delivery Select -->
                     <div>
                         <label class="block text-[11px] font-bold text-slate-600 mb-1">Escolha a 1ª Entrega:</label>
                         <select id="start-point-select" class="w-full border border-slate-300 rounded-lg p-1.5 text-xs bg-white focus:ring-2 focus:ring-indigo-500 outline-none truncate" disabled>
@@ -160,7 +153,6 @@
                         </select>
                     </div>
 
-                    <!-- Rule Toggle: Prioritize Same Street -->
                     <div class="flex items-center space-x-2 px-1 py-1 bg-indigo-50/60 rounded-md border border-indigo-100">
                         <input type="checkbox" id="prioritize-same-street" class="rounded text-indigo-600 focus:ring-indigo-500 h-4 w-4 cursor-pointer" checked>
                         <label for="prioritize-same-street" class="text-[11px] font-bold text-indigo-900 cursor-pointer">
@@ -168,7 +160,6 @@
                         </label>
                     </div>
 
-                    <!-- Action Buttons inside Collapsible Menu (Grid 2 colunas) -->
                     <div class="grid grid-cols-2 gap-1.5 pt-1">
                         <button id="btn-optimize" disabled class="w-full bg-indigo-600 hover:bg-indigo-700 disabled:bg-slate-300 disabled:text-slate-500 text-white text-xs font-bold py-2 px-2 rounded-lg shadow transition flex items-center justify-center space-x-1 truncate">
                             <i class="fa-solid fa-route"></i>
@@ -190,7 +181,7 @@
                             <span class="truncate">Exportar Excel</span>
                         </button>
                     </div>
-					<!-- Dentro do #collapsible-menu -->
+
 					<div class="pt-2 border-t border-slate-800 mt-3">
 					    <label class="text-[10px] uppercase font-bold text-slate-400 block mb-1.5">Mapa Offline</label>
 					    <button onclick="downloadAvareUrbanMap()" class="w-full bg-slate-800 hover:bg-slate-700 active:scale-95 text-amber-400 font-bold text-xs py-2.5 px-3 rounded-xl border border-slate-700 flex items-center justify-center space-x-2 transition shadow-sm">
@@ -198,7 +189,7 @@
 					        <span>Baixar Avaré Offline</span>
 					    </button>
 					</div>
-					<!-- Estado da rota salva no aparelho -->
+
 					<div class="pt-2 border-t border-slate-800 mt-3">
 					    <label class="text-[10px] uppercase font-bold text-slate-400 block mb-1.5">Rota offline</label>
 					    <div id="route-status" class="text-[11px] text-slate-600 leading-snug mb-1.5">Nenhuma rota calculada.</div>
@@ -207,7 +198,7 @@
 					        <span>Baixar trechos pendentes</span>
 					    </button>
 					</div>
-					<!-- Configurações que ficam SÓ neste aparelho (fora do GitHub) -->
+
 					<div class="pt-2 border-t border-slate-800 mt-3">
 					    <label class="text-[10px] uppercase font-bold text-slate-400 block mb-1.5">Configurações do aparelho</label>
 					    <input id="setting-ors-key" type="password" autocomplete="off" spellcheck="false" placeholder="Chave OpenRouteService (opcional)" class="w-full text-[11px] border border-slate-300 rounded-lg px-2 py-1.5 mb-1.5 bg-white text-slate-800">
@@ -234,47 +225,37 @@
         <main id="map-panel" class="flex-1 w-full h-full relative hidden md:block">
             <div id="map"></div>
 
-			<!-- Painel Superior de Orientação do Modo Navegação -->
+			<!-- Painel Superior do Modo Navegação -->
 			<div id="nav-header-panel" class="hidden absolute top-3 left-3 right-3 sm:right-4 z-30 bg-slate-900/95 text-white p-3 rounded-2xl shadow-2xl border border-slate-700 backdrop-blur-md">
 			    <div class="flex items-center justify-between">
 			        <div class="flex-1 min-w-0 mr-2">
 			            <div class="flex items-start space-x-2.5 min-w-0 mb-1">
-			                <!-- Círculo do Número da Entrega (+40% maior) -->
 			                <div class="w-[39px] h-[39px] rounded-full bg-amber-400 text-slate-950 font-black text-[17px] flex items-center justify-center shrink-0 shadow mt-0.5">
 			                    <span id="nav-next-num">#</span>
 			                </div>
-			                
-			                <!-- Texto "Próximo Destino" e Código BRXXXXXXXXX em baixo -->
 			                <div class="min-w-0 flex flex-col">
 			                    <p id="nav-next-label" class="text-[10px] uppercase font-bold text-amber-400 tracking-wider">Próximo Destino</p>
 			                    <h3 id="nav-next-title" class="text-xs sm:text-sm font-bold truncate text-amber-300">Carregando...</h3>
 			                </div>
 			            </div>
-			
 			            <p id="nav-next-address" class="text-base sm:text-lg text-slate-100 font-bold break-words leading-tight mt-0.5">Aguardando rota...</p>
 			        </div>
-			
-			        <!-- Botões de Ação para Entregas de Pacotes (+30% maiores) -->
+
 			        <div id="nav-delivery-actions" class="flex flex-col items-center shrink-0 ml-1 space-y-1">
-			            <button onclick="skipCurrentDelivery()" title="Pular Entrega (Voltar depois)" class="w-full h-7 bg-amber-500 hover:bg-amber-400 text-slate-950 rounded-lg flex items-center justify-center text-xs shadow font-bold">
+			            <button onclick="skipCurrentDelivery()" title="Pular Entrega" class="w-full h-7 bg-amber-500 hover:bg-amber-400 text-slate-950 rounded-lg flex items-center justify-center text-xs shadow font-bold">
 			                <i class="fa-solid fa-forward-step"></i>
 			            </button>
-			
 			            <div class="flex items-center space-x-1.5">
-			                <!-- Botão Sucesso (+30%: 42px x 42px) -->
 			                <button onclick="setDeliveryStatus(currentNavIndex, 'success')" title="Concluir Entrega" class="w-[42px] h-[42px] bg-emerald-600 hover:bg-emerald-500 text-white rounded-xl flex items-center justify-center text-base shadow font-bold transition-transform active:scale-95">
 			                    <i class="fa-solid fa-check"></i>
 			                </button>
-			                <!-- Botão Ocorrência (+30%: 42px x 42px) -->
 			                <button onclick="setDeliveryStatus(currentNavIndex, 'occurrence')" title="Ocorrência" class="w-[42px] h-[42px] bg-rose-600 hover:bg-rose-500 text-white rounded-xl flex items-center justify-center text-base shadow font-bold transition-transform active:scale-95">
 			                    <i class="fa-solid fa-xmark"></i>
 			                </button>
 			            </div>
-			
 			            <span id="nav-next-house-num" class="hidden text-[10px] font-bold text-amber-300 tracking-tight whitespace-nowrap leading-none mt-0.5"></span>
 			        </div>
-			
-			        <!-- Botão de Ação para Endereço Pesquisado Personalizado -->
+
 			        <div id="nav-custom-search-actions" class="hidden flex items-center shrink-0 ml-2">
 			            <button onclick="cancelCustomSearchRoute()" class="bg-rose-600 hover:bg-rose-700 text-white text-xs font-bold py-1.5 px-2.5 rounded-xl shadow transition flex items-center space-x-1.5">
 			                <i class="fa-solid fa-ban text-xs"></i>
@@ -284,10 +265,10 @@
 			    </div>
 			</div>
 
-			<!-- Modal/Box de Pesquisa de Endereço -->
+			<!-- Modal de Pesquisa -->
             <div id="search-box-panel" class="hidden absolute top-3 left-3 right-16 z-40 bg-slate-900/95 text-white p-3 rounded-2xl shadow-2xl border border-slate-700 backdrop-blur-md space-y-2">
                 <div class="flex items-center space-x-2">
-                    <input type="text" id="search-address-input" onkeydown="if(event.key==='Enter') executeAddressSearch()" placeholder="Digite a rua e o número (ex: Rua Flores, 123)..." class="flex-1 bg-slate-800 border border-slate-700 text-white text-xs rounded-xl p-2 focus:ring-2 focus:ring-amber-400 outline-none">
+                    <input type="text" id="search-address-input" onkeydown="if(event.key==='Enter') executeAddressSearch()" placeholder="Digite a rua e o número..." class="flex-1 bg-slate-800 border border-slate-700 text-white text-xs rounded-xl p-2 focus:ring-2 focus:ring-amber-400 outline-none">
                     <button onclick="executeAddressSearch()" class="bg-amber-400 hover:bg-amber-500 text-slate-950 font-bold text-xs px-3 py-2 rounded-xl transition">
                         <i class="fa-solid fa-search"></i>
                     </button>
@@ -297,22 +278,28 @@
                 <div id="search-results-list" class="max-h-40 overflow-y-auto space-y-1 text-xs custom-scroll"></div>
             </div>
 
-            <!-- Botão Flutuante de Pesquisa de Endereço -->
+            <!-- Botão Flutuante de Modo Âncora (Novo) -->
+            <button id="btn-anchor-toggle" onclick="toggleAnchorMode()" title="Ativar Modo Âncora (Clique no mapa para marcar a sequência)" class="absolute bottom-[340px] right-3 z-20 h-11 px-3 bg-slate-900/90 hover:bg-slate-800 text-purple-400 backdrop-blur-md rounded-full shadow-2xl border border-slate-700 flex items-center justify-center space-x-1.5 font-extrabold text-xs active:scale-95 transition">
+                <i class="fa-solid fa-anchor"></i>
+                <span id="anchor-count-badge" class="bg-purple-600 text-white rounded-full w-4 h-4 flex items-center justify-center text-[10px] font-black">0</span>
+            </button>
+
+            <!-- Botão Pesquisa de Endereço -->
             <button id="btn-search-toggle" onclick="toggleSearchBox()" title="Pesquisar Endereço" class="absolute bottom-72 right-3 z-20 w-11 h-11 bg-slate-900/90 hover:bg-slate-800 text-slate-300 backdrop-blur-md rounded-full shadow-2xl border border-slate-700 flex items-center justify-center text-base active:scale-95 transition">
                 <i class="fa-solid fa-magnifying-glass"></i>
             </button>
 
-            <!-- Botão Flutuante de Modo 3D -->
+            <!-- Botão Modo 3D -->
             <button id="btn-3d-toggle" onclick="toggle3DMode()" title="Alternar Modo 3D / 2D" class="absolute bottom-60 right-3 z-20 w-11 h-11 bg-slate-900/90 hover:bg-slate-800 text-slate-300 backdrop-blur-md rounded-full shadow-2xl border border-slate-700 flex items-center justify-center font-extrabold text-xs active:scale-95 transition">
                 3D
             </button>
 
-            <!-- Botão Flutuante de Modo Navegação no Mapa -->
+            <!-- Botão Modo Navegação -->
             <button id="btn-gps-nav-mode" onclick="toggleNavigationMode()" title="Modo Navegação Guiada" class="absolute bottom-48 right-3 z-20 w-11 h-11 bg-slate-900/90 hover:bg-slate-800 text-amber-400 backdrop-blur-md rounded-full shadow-2xl border border-slate-700 flex items-center justify-center text-lg active:scale-95 transition">
                 <i class="fa-solid fa-compass" id="nav-compass-icon"></i>
             </button>
 
-            <!-- Floating GPS Real-time Toggle Button -->
+            <!-- Botão GPS Real-time -->
             <button id="btn-gps-toggle" onclick="toggleGPS()" title="Ativar GPS em Tempo Real" class="absolute bottom-36 right-3 z-20 w-11 h-11 bg-slate-900/90 hover:bg-slate-800 text-slate-300 backdrop-blur-md rounded-full shadow-2xl border border-slate-700 flex items-center justify-center text-lg active:scale-95 transition">
                 <i class="fa-solid fa-location-crosshairs" id="gps-icon"></i>
             </button>
@@ -330,32 +317,26 @@
 	<!-- Modal do Leitor de QR Code -->
     <div id="qr-modal" class="hidden fixed inset-0 bg-slate-950/85 backdrop-blur-md z-[2000] flex flex-col items-center justify-center p-4">
         <div class="bg-slate-900 border border-slate-700 rounded-2xl w-full max-w-md overflow-hidden shadow-2xl flex flex-col relative">
-            <!-- Header do Modal com Contador de Conferência -->
             <div class="bg-slate-800 px-4 py-3 border-b border-slate-700 flex items-center justify-between">
                 <div class="flex items-center space-x-2 text-purple-400 font-bold text-sm">
                     <i class="fa-solid fa-qrcode text-base"></i>
                     <span>Conferência de Pacotes</span>
                 </div>
-                
                 <div class="flex items-center space-x-2">
-                    <!-- Contador de Pacotes Escaneados -->
                     <span id="qr-scan-counter" class="text-xs bg-purple-950 text-purple-200 px-2.5 py-0.5 rounded-full font-bold border border-purple-700/50">0 / 0</span>
                     <button onclick="closeQrScannerModal()" class="text-slate-400 hover:text-white font-bold text-lg px-2 active:scale-95 transition" title="Fechar leitor">✕</button>
                 </div>
             </div>
 
-            <!-- Banner Verde quando 100% dos Pacotes forem Escaneados -->
             <div id="qr-complete-banner" class="hidden bg-emerald-600 text-white text-xs font-black px-4 py-2 flex items-center justify-center space-x-2 shadow-md">
                 <i class="fa-solid fa-circle-check text-base"></i>
                 <span>TODOS OS PACOTES FORAM CONFERIDOS!</span>
             </div>
 
-            <!-- Área de Vídeo / Leitor HTML5 -->
             <div class="p-4 flex flex-col items-center justify-center relative bg-black min-h-[340px]">
                 <div id="qr-reader" class="w-full rounded-xl overflow-hidden border border-slate-800"></div>
                 <p class="text-slate-400 text-xs mt-3 text-center">Aproxime a câmera da etiqueta com QR Code do pacote</p>
 
-                <!-- Overlay de Resultado Grande -->
                 <div id="qr-result-overlay" class="hidden absolute inset-0 bg-amber-400 text-slate-950 flex flex-col items-center justify-center p-4 z-10 text-center transition-all duration-300">
                     <span class="text-xs font-black uppercase tracking-widest bg-slate-950 text-amber-400 px-3.5 py-1 rounded-full mb-2">Número na Rota</span>
                     <h2 id="qr-result-number" class="text-8xl sm:text-9xl font-black leading-none drop-shadow-md">#--</h2>
@@ -363,7 +344,6 @@
                     <p id="qr-result-address" class="text-sm sm:text-base font-extrabold text-slate-950 break-words max-w-full mt-2 leading-snug px-2"></p>
                 </div>
 
-                <!-- Overlay de Erro -->
                 <div id="qr-error-overlay" class="hidden absolute inset-0 bg-rose-600 text-white flex flex-col items-center justify-center p-4 z-10 text-center transition-all duration-300">
                     <i class="fa-solid fa-triangle-exclamation text-5xl mb-2"></i>
                     <h3 class="text-xl font-bold">Pacote Não Encontrado</h3>
@@ -385,28 +365,26 @@
         </button>
     </nav>
 	
-	<!-- Script de Auto-Atualização Universal -->
+	<!-- Service Worker Auto-Update -->
 	<script>
 	  if ('serviceWorker' in navigator && window.location.protocol.startsWith('http')) {
 		window.addEventListener('load', () => {
-		  // 1. Registra o Service Worker e força buscar a versão do GitHub no servidor
 		  navigator.serviceWorker.register('./sw.js').then(reg => {
-			reg.update(); // Checa se mudou algo no GitHub sempre que o app abre
+			reg.update();
 		  });
 
-		  // 2. Quando o Service Worker novo for instalado, recarrega a página na hora
 		  let recarregando = false;
 		  navigator.serviceWorker.addEventListener('controllerchange', () => {
 			if (!recarregando) {
 			  recarregando = true;
-			  window.location.reload(); // Atualiza a tela com o software novo
+			  window.location.reload();
 			}
 		  });
 		});
 	  }
 	</script>
 	
-	<!-- Modal de Diálogo Customizado (Substitui alert e confirm) -->
+	<!-- Modal Dialog Customizado -->
 	<div id="custom-dialog-modal" class="hidden fixed inset-0 bg-slate-950/80 backdrop-blur-sm z-[3000] flex items-center justify-center p-4">
 		<div class="bg-slate-900 border border-slate-700 text-white rounded-2xl w-full max-w-sm overflow-hidden shadow-2xl p-5 space-y-4">
 			<div class="flex items-start space-x-3">
@@ -426,5 +404,4 @@
 	</div>
 	
 </body>
-	
 </html>
