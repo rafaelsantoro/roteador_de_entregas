@@ -384,26 +384,46 @@
             <span>Mapa</span>
         </button>
     </nav>
+	
 	<!-- Script de Auto-Atualização Universal -->
-<script>
-  if ('serviceWorker' in navigator && window.location.protocol.startsWith('http')) {
-    window.addEventListener('load', () => {
-      // 1. Registra o Service Worker e força buscar a versão do GitHub no servidor
-      navigator.serviceWorker.register('./sw.js').then(reg => {
-        reg.update(); // Checa se mudou algo no GitHub sempre que o app abre
-      });
+	<script>
+	  if ('serviceWorker' in navigator && window.location.protocol.startsWith('http')) {
+		window.addEventListener('load', () => {
+		  // 1. Registra o Service Worker e força buscar a versão do GitHub no servidor
+		  navigator.serviceWorker.register('./sw.js').then(reg => {
+			reg.update(); // Checa se mudou algo no GitHub sempre que o app abre
+		  });
 
-      // 2. Quando o Service Worker novo for instalado, recarrega a página na hora
-      let recarregando = false;
-      navigator.serviceWorker.addEventListener('controllerchange', () => {
-        if (!recarregando) {
-          recarregando = true;
-          window.location.reload(); // Atualiza a tela com o software novo
-        }
-      });
-    });
-  }
-</script>
+		  // 2. Quando o Service Worker novo for instalado, recarrega a página na hora
+		  let recarregando = false;
+		  navigator.serviceWorker.addEventListener('controllerchange', () => {
+			if (!recarregando) {
+			  recarregando = true;
+			  window.location.reload(); // Atualiza a tela com o software novo
+			}
+		  });
+		});
+	  }
+	</script>
+	
+	<!-- Modal de Diálogo Customizado (Substitui alert e confirm) -->
+	<div id="custom-dialog-modal" class="hidden fixed inset-0 bg-slate-950/80 backdrop-blur-sm z-[3000] flex items-center justify-center p-4">
+		<div class="bg-slate-900 border border-slate-700 text-white rounded-2xl w-full max-w-sm overflow-hidden shadow-2xl p-5 space-y-4">
+			<div class="flex items-start space-x-3">
+				<div id="custom-dialog-icon-bg" class="w-10 h-10 rounded-xl bg-indigo-950 border border-indigo-700/50 text-indigo-400 flex items-center justify-center shrink-0 text-lg">
+					<i id="custom-dialog-icon" class="fa-solid fa-circle-info"></i>
+				</div>
+				<div class="flex-1 min-w-0">
+					<h3 id="custom-dialog-title" class="font-bold text-sm text-slate-100">Aviso</h3>
+					<p id="custom-dialog-message" class="text-xs text-slate-300 mt-1 whitespace-pre-line leading-relaxed"></p>
+				</div>
+			</div>
+			<div class="flex justify-end space-x-2 pt-2 border-t border-slate-800">
+				<button id="custom-dialog-cancel" class="bg-slate-800 hover:bg-slate-700 text-slate-300 text-xs font-bold py-2 px-3.5 rounded-xl transition">Cancelar</button>
+				<button id="custom-dialog-confirm" class="bg-indigo-600 hover:bg-indigo-500 text-white text-xs font-bold py-2 px-3.5 rounded-xl transition">OK</button>
+			</div>
+		</div>
+	</div>
 	
 </body>
 	
